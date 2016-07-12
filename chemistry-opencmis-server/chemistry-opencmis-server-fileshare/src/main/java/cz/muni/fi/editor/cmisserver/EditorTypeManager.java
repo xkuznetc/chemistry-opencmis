@@ -33,6 +33,24 @@ public class EditorTypeManager implements TypeManager, AdditionalTypemanager, In
 
     private TypeDefinitionFactory typeDefinitionFactory;
 
+    public EditorTypeManager(){
+        typeDefinitionFactory = TypeDefinitionFactory.newInstance();
+        typeDefinitionFactory.setDefaultNamespace(NAMESPACE);
+        typeDefinitionFactory.setDefaultControllableAcl(false);
+        typeDefinitionFactory.setDefaultQueryable(true);
+        typeDefinitionFactory.setDefaultFulltextIndexed(false);
+        typeDefinitionFactory.setDefaultTypeMutability(typeDefinitionFactory.createTypeMutability(false, false, false));
+
+        TypeDefinitionContainer folder = createFolderType(CmisVersion.CMIS_1_1);
+        TypeDefinitionContainer document = createDocumentTypeDefinition(CmisVersion.CMIS_1_1);
+
+        // add folder and document as base types for hierarchy
+        tdcMap.put(folder.getTypeDefinition().getId(),folder);
+        tdcMap.put(document.getTypeDefinition().getId(),document);
+        tdMap.put(folder.getTypeDefinition().getId(),folder.getTypeDefinition());
+        tdMap.put(document.getTypeDefinition().getId(),document.getTypeDefinition());
+    }
+
     @Override
     public TypeDefinition getTypeDefinition(CallContext context, String typeId)
     {
