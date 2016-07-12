@@ -18,6 +18,7 @@
  */
 package org.apache.chemistry.opencmis.fileshare;
 
+import cz.muni.fi.editor.cmisserver.AdditionalTypemanager;
 import org.apache.chemistry.opencmis.commons.BasicPermissions;
 import org.apache.chemistry.opencmis.commons.PropertyIds;
 import org.apache.chemistry.opencmis.commons.data.*;
@@ -33,6 +34,7 @@ import org.apache.chemistry.opencmis.commons.server.CallContext;
 import org.apache.chemistry.opencmis.commons.server.ObjectInfoHandler;
 import org.apache.chemistry.opencmis.commons.spi.Holder;
 import org.apache.chemistry.opencmis.server.impl.ServerVersion;
+import org.apache.chemistry.opencmis.server.support.TypeManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -64,7 +66,7 @@ public class FileShareRepository {
     /** Root directory. */
     private final File root;
     /** Types. */
-    private final FileShareTypeManager typeManager;
+    private final TypeManager typeManager;
     /** Users. */
     private final Map<String, Boolean> readWriteUserMap;
 
@@ -73,7 +75,7 @@ public class FileShareRepository {
     /** CMIS 1.1 repository info. */
     private final RepositoryInfo repositoryInfo11;
 
-    public FileShareRepository(final String repositoryId, final String rootPath, final FileShareTypeManager typeManager) {
+    public FileShareRepository(final String repositoryId, final String rootPath, final TypeManager typeManager) {
         // check repository id
         if (repositoryId == null || repositoryId.trim().length() == 0) {
             throw new IllegalArgumentException("Invalid repository id!");
@@ -283,7 +285,7 @@ public class FileShareRepository {
         debug("getTypesChildren");
         checkUser(context, false);
 
-        return typeManager.getTypeChildren(context, typeId, includePropertyDefinitions, maxItems, skipCount);
+        return ((AdditionalTypemanager) typeManager).getTypeChildren(context, typeId, includePropertyDefinitions, maxItems, skipCount);
     }
 
     /**
@@ -294,7 +296,7 @@ public class FileShareRepository {
         debug("getTypesDescendants");
         checkUser(context, false);
 
-        return typeManager.getTypeDescendants(context, typeId, depth, includePropertyDefinitions);
+        return ((AdditionalTypemanager) typeManager).getTypeDescendants(context, typeId, depth, includePropertyDefinitions);
     }
 
     /**
@@ -304,7 +306,7 @@ public class FileShareRepository {
         debug("getTypeDefinition");
         checkUser(context, false);
 
-        return typeManager.getTypeDefinition(context, typeId);
+        return ((AdditionalTypemanager) typeManager).getTypeDefinition(context, typeId);
     }
 
     /**
@@ -316,15 +318,15 @@ public class FileShareRepository {
         boolean userReadOnly = checkUser(context, true);
 
         String typeId = FileShareUtils.getObjectTypeId(properties);
-        TypeDefinition type = typeManager.getInternalTypeDefinition(typeId);
-        if (type == null) {
+        TypeDefinitionContainer tdc = typeManager.getTypeById(typeId);
+        if (tdc == null) {
             throw new CmisObjectNotFoundException("Type '" + typeId + "' is unknown!");
         }
 
         String objectId = null;
-        if (type.getBaseTypeId() == BaseTypeId.CMIS_DOCUMENT) {
+        if (tdc.getTypeDefinition().getBaseTypeId() == BaseTypeId.CMIS_DOCUMENT) {
             objectId = createDocument(context, properties, folderId, contentStream, versioningState);
-        } else if (type.getBaseTypeId() == BaseTypeId.CMIS_FOLDER) {
+        } else if (tdc.getTypeDefinition().getBaseTypeId() == BaseTypeId.CMIS_FOLDER) {
             if (contentStream != null || versioningState != null) {
                 throw new CmisInvalidArgumentException("Cannot create a folder with content or a versioning state!");
             }
@@ -357,11 +359,11 @@ public class FileShareRepository {
 
         // check type
         String typeId = FileShareUtils.getObjectTypeId(properties);
-        TypeDefinition type = typeManager.getInternalTypeDefinition(typeId);
-        if (type == null) {
+        TypeDefinitionContainer tdc = typeManager.getTypeById(typeId);
+        if (tdc == null) {
             throw new CmisObjectNotFoundException("Type '" + typeId + "' is unknown!");
         }
-        if (type.getBaseTypeId() != BaseTypeId.CMIS_DOCUMENT) {
+        if (tdc.getTypeDefinition().getBaseTypeId() != BaseTypeId.CMIS_DOCUMENT) {
             throw new CmisInvalidArgumentException("Type must be a document type!");
         }
 
@@ -470,17 +472,17 @@ public class FileShareRepository {
             }
 
             // get the property definitions
-            TypeDefinition type = typeManager.getInternalTypeDefinition(typeId);
-            if (type == null) {
+            TypeDefinitionContainer tdc = typeManager.getTypeById(typeId);
+            if (tdc == null) {
                 throw new CmisObjectNotFoundException("Type '" + typeId + "' is unknown!");
             }
-            if (type.getBaseTypeId() != BaseTypeId.CMIS_DOCUMENT) {
+            if (tdc.getTypeDefinition().getBaseTypeId() != BaseTypeId.CMIS_DOCUMENT) {
                 throw new CmisInvalidArgumentException("Type must be a document type!");
             }
 
             // replace with new values
             for (PropertyData<?> prop : properties.getProperties().values()) {
-                PropertyDefinition<?> propType = type.getPropertyDefinitions().get(prop.getId());
+                PropertyDefinition<?> propType = tdc.getTypeDefinition().getPropertyDefinitions().get(prop.getId());
 
                 // do we know that property?
                 if (propType == null) {
@@ -563,11 +565,11 @@ public class FileShareRepository {
 
         // check type
         String typeId = FileShareUtils.getObjectTypeId(properties);
-        TypeDefinition type = typeManager.getInternalTypeDefinition(typeId);
-        if (type == null) {
+        TypeDefinitionContainer tdc = typeManager.getTypeById(typeId);
+        if (tdc == null) {
             throw new CmisObjectNotFoundException("Type '" + typeId + "' is unknown!");
         }
-        if (type.getBaseTypeId() != BaseTypeId.CMIS_FOLDER) {
+        if (tdc.getTypeDefinition().getBaseTypeId() != BaseTypeId.CMIS_FOLDER) {
             throw new CmisInvalidArgumentException("Type must be a folder type!");
         }
 
@@ -865,14 +867,14 @@ public class FileShareRepository {
         }
 
         // get the property definitions
-        TypeDefinition type = typeManager.getInternalTypeDefinition(typeId);
-        if (type == null) {
+        TypeDefinitionContainer tdc = typeManager.getTypeById(typeId);
+        if (tdc == null) {
             throw new CmisObjectNotFoundException("Type '" + typeId + "' is unknown!");
         }
 
         // copy old properties
         for (PropertyData<?> prop : oldProperties.getProperties().values()) {
-            PropertyDefinition<?> propType = type.getPropertyDefinitions().get(prop.getId());
+            PropertyDefinition<?> propType = tdc.getTypeDefinition().getPropertyDefinitions().get(prop.getId());
 
             // do we know that property?
             if (propType == null) {
@@ -889,7 +891,7 @@ public class FileShareRepository {
 
         // update properties
         for (PropertyData<?> prop : properties.getProperties().values()) {
-            PropertyDefinition<?> propType = type.getPropertyDefinitions().get(prop.getId());
+            PropertyDefinition<?> propType = tdc.getTypeDefinition().getPropertyDefinitions().get(prop.getId());
 
             // do we know that property?
             if (propType == null) {
@@ -1696,14 +1698,14 @@ public class FileShareRepository {
         }
 
         // get the property definitions
-        TypeDefinition type = typeManager.getInternalTypeDefinition(typeId);
-        if (type == null) {
+        TypeDefinitionContainer tdc = typeManager.getTypeById(typeId);
+        if (tdc == null) {
             throw new CmisObjectNotFoundException("Type '" + typeId + "' is unknown!");
         }
 
         // check if all required properties are there
         for (PropertyData<?> prop : properties.getProperties().values()) {
-            PropertyDefinition<?> propType = type.getPropertyDefinitions().get(prop.getId());
+            PropertyDefinition<?> propType = tdc.getTypeDefinition().getPropertyDefinitions().get(prop.getId());
 
             // do we know that property?
             if (propType == null) {
@@ -1728,7 +1730,7 @@ public class FileShareRepository {
         }
 
         // check if required properties are missing
-        for (PropertyDefinition<?> propDef : type.getPropertyDefinitions().values()) {
+        for (PropertyDefinition<?> propDef : tdc.getTypeDefinition().getPropertyDefinitions().values()) {
             if (!addedProps.contains(propDef.getId()) && propDef.getUpdatability() != Updatability.READONLY) {
                 if (!addPropertyDefault(result, propDef) && propDef.isRequired()) {
                     throw new CmisConstraintException("Property '" + propDef.getId() + "' is required!");
@@ -1846,15 +1848,15 @@ public class FileShareRepository {
             throw new IllegalArgumentException("Id must not be null!");
         }
 
-        TypeDefinition type = typeManager.getInternalTypeDefinition(typeId);
-        if (type == null) {
+        TypeDefinitionContainer tdc = typeManager.getTypeById(typeId);
+        if (tdc == null) {
             throw new IllegalArgumentException("Unknown type: " + typeId);
         }
-        if (!type.getPropertyDefinitions().containsKey(id)) {
+        if (!tdc.getTypeDefinition().getPropertyDefinitions().containsKey(id)) {
             throw new IllegalArgumentException("Unknown property: " + id);
         }
 
-        String queryName = type.getPropertyDefinitions().get(id).getQueryName();
+        String queryName = tdc.getTypeDefinition().getPropertyDefinitions().get(id).getQueryName();
 
         if (queryName != null && filter != null) {
             if (!filter.contains(queryName)) {

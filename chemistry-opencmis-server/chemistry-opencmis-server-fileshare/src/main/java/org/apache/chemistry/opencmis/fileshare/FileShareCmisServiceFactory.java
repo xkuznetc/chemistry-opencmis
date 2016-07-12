@@ -24,9 +24,13 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
+import cz.muni.fi.editor.cmisserver.EditorTypeManager;
+import cz.muni.fi.editor.cmisserver.InitializingTypeManager;
+import cz.muni.fi.editor.cmisserver.JSPTypeManager;
 import org.apache.chemistry.opencmis.commons.impl.server.AbstractServiceFactory;
 import org.apache.chemistry.opencmis.commons.server.CallContext;
 import org.apache.chemistry.opencmis.commons.server.CmisService;
+import org.apache.chemistry.opencmis.server.support.TypeManager;
 import org.apache.chemistry.opencmis.server.support.wrapper.CallContextAwareCmisService;
 import org.apache.chemistry.opencmis.server.support.wrapper.CmisServiceWrapperManager;
 import org.apache.chemistry.opencmis.server.support.wrapper.ConformanceCmisServiceWrapper;
@@ -66,7 +70,7 @@ public class FileShareCmisServiceFactory extends AbstractServiceFactory {
 
     private FileShareRepositoryManager repositoryManager;
     private FileShareUserManager userManager;
-    private FileShareTypeManager typeManager;
+    private TypeManager typeManager;
     private CmisServiceWrapperManager wrapperManager;
 
     public FileShareRepositoryManager getRepositoryManager() {
@@ -77,15 +81,16 @@ public class FileShareCmisServiceFactory extends AbstractServiceFactory {
         return userManager;
     }
 
-    public FileShareTypeManager getTypeManager() {
-        return typeManager;
+    // used in jsp
+    public JSPTypeManager getTypeManager() {
+        return (JSPTypeManager) typeManager;
     }
 
     @Override
     public void init(Map<String, String> parameters) {
         repositoryManager = new FileShareRepositoryManager();
         userManager = new FileShareUserManager();
-        typeManager = new FileShareTypeManager();
+        typeManager = new EditorTypeManager();
 
         wrapperManager = new CmisServiceWrapperManager();
         wrapperManager.addWrappersFromServiceFactoryParameters(parameters);
@@ -165,7 +170,7 @@ public class FileShareCmisServiceFactory extends AbstractServiceFactory {
 
                 if (typeFile.charAt(0) == '/') {
                     try {
-                        typeManager.loadTypeDefinitionFromResource(typeFile);
+                        ((InitializingTypeManager)typeManager).loadTypeDefinitionFromResource(typeFile);
                         continue;
                     } catch (IllegalArgumentException e) {
                         // resource not found -> try it as a regular file
@@ -176,7 +181,7 @@ public class FileShareCmisServiceFactory extends AbstractServiceFactory {
                 }
 
                 try {
-                    typeManager.loadTypeDefinitionFromFile(typeFile);
+                    ((InitializingTypeManager)typeManager).loadTypeDefinitionFromFile(typeFile);
                 } catch (Exception e) {
                     LOG.warn("Could not load type defintion from file '{}': {}", typeFile, e.getMessage(), e);
                 }
