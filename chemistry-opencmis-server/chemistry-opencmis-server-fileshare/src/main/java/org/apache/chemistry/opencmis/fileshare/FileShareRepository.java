@@ -38,6 +38,7 @@ import org.apache.chemistry.opencmis.server.support.TypeManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
 import javax.xml.stream.XMLStreamWriter;
 import java.io.*;
@@ -171,14 +172,14 @@ public class FileShareRepository {
         aclCapability.setAclPropagation(AclPropagation.OBJECTONLY);
 
         // permissions
-        List<PermissionDefinition> permissions = new ArrayList<PermissionDefinition>();
+        List<PermissionDefinition> permissions = new ArrayList<>();
         permissions.add(createPermission(BasicPermissions.READ, "Read"));
         permissions.add(createPermission(BasicPermissions.WRITE, "Write"));
         permissions.add(createPermission(BasicPermissions.ALL, "All"));
         aclCapability.setPermissionDefinitionData(permissions);
 
         // mapping
-        List<PermissionMapping> list = new ArrayList<PermissionMapping>();
+        List<PermissionMapping> list = new ArrayList<>();
         list.add(createMapping(PermissionMapping.CAN_CREATE_DOCUMENT_FOLDER, BasicPermissions.READ));
         list.add(createMapping(PermissionMapping.CAN_CREATE_FOLDER_FOLDER, BasicPermissions.READ));
         list.add(createMapping(PermissionMapping.CAN_DELETE_CONTENT_DOCUMENT, BasicPermissions.WRITE));
@@ -197,7 +198,7 @@ public class FileShareRepository {
         list.add(createMapping(PermissionMapping.CAN_SET_CONTENT_DOCUMENT, BasicPermissions.WRITE));
         list.add(createMapping(PermissionMapping.CAN_UPDATE_PROPERTIES_OBJECT, BasicPermissions.WRITE));
         list.add(createMapping(PermissionMapping.CAN_VIEW_CONTENT_OBJECT, BasicPermissions.READ));
-        Map<String, PermissionMapping> map = new LinkedHashMap<String, PermissionMapping>();
+        Map<String, PermissionMapping> map = new LinkedHashMap<>();
         for (PermissionMapping pm : list) {
             map.put(pm.getKey(), pm);
         }
@@ -672,24 +673,23 @@ public class FileShareRepository {
             throw new CmisContentAlreadyExistsException("Content already exists!");
         }
 
-        OutputStream out = null;
-        InputStream in = null;
-        try {
-            out = new FileOutputStream(file, append);
-
-            if (contentStream == null || contentStream.getStream() == null) {
-                // delete content
+        try(OutputStream out = new FileOutputStream(file,append))
+        {
+            if(contentStream == null || contentStream.getStream() == null)
+            {
                 out.write(new byte[0]);
-            } else {
-                // set content
-                in = contentStream.getStream();
-                IOUtils.copy(in, out, BUFFER_SIZE);
             }
-        } catch (Exception e) {
-            throw new CmisStorageException("Could not write content: " + e.getMessage(), e);
-        } finally {
-            IOUtils.closeQuietly(out);
-            IOUtils.closeQuietly(in);
+            else
+            {
+                try(InputStream in = contentStream.getStream())
+                {
+                    IOUtils.copy(in, out, BUFFER_SIZE);
+                }
+            }
+        }
+        catch(IOException ex)
+        {
+            throw new CmisStorageException("Could not write content: " + ex.getMessage(), ex);
         }
     }
 
@@ -936,7 +936,7 @@ public class FileShareRepository {
             throw new CmisInvalidArgumentException("No object ids provided!");
         }
 
-        List<BulkUpdateObjectIdAndChangeToken> result = new ArrayList<BulkUpdateObjectIdAndChangeToken>();
+        List<BulkUpdateObjectIdAndChangeToken> result = new ArrayList<>();
 
         for (BulkUpdateObjectIdAndChangeToken oid : objectIdAndChangeToken) {
             if (oid == null) {
@@ -944,7 +944,7 @@ public class FileShareRepository {
                 continue;
             }
             try {
-                Holder<String> oidHolder = new Holder<String>(oid.getId());
+                Holder<String> oidHolder = new Holder<>(oid.getId());
                 updateProperties(context, oidHolder, properties, objectInfos);
 
                 result.add(new BulkUpdateObjectIdAndChangeTokenImpl(oid.getId(), oidHolder.getValue(), null));
@@ -1097,7 +1097,7 @@ public class FileShareRepository {
         }
 
         // get the children
-        List<File> children = new ArrayList<File>();
+        List<File> children = new ArrayList<>();
         for (File child : folder.listFiles()) {
             // skip hidden and shadow files
             if (child.isHidden() || child.getName().equals(SHADOW_FOLDER) || child.getPath().endsWith(SHADOW_EXT)) {
@@ -1260,7 +1260,7 @@ public class FileShareRepository {
         }
 
         // get the tree
-        List<ObjectInFolderContainer> result = new ArrayList<ObjectInFolderContainer>();
+        List<ObjectInFolderContainer> result = new ArrayList<>();
         gatherDescendants(context, folder, result, foldersOnly, d, filterCollection, iaa, ips, userReadOnly,
                 objectInfos);
 
@@ -1691,7 +1691,7 @@ public class FileShareRepository {
      */
     private PropertiesImpl compileWriteProperties(String typeId, String creator, String modifier, Properties properties) {
         PropertiesImpl result = new PropertiesImpl();
-        Set<String> addedProps = new HashSet<String>();
+        Set<String> addedProps = new HashSet<>();
 
         if (properties == null || properties.getProperties() == null) {
             throw new CmisConstraintException("No properties!");
@@ -1761,18 +1761,15 @@ public class FileShareRepository {
         ObjectDataImpl object = new ObjectDataImpl();
         object.setProperties(properties);
 
-        OutputStream stream = null;
-        try {
-            stream = new BufferedOutputStream(new FileOutputStream(propFile));
+        try(OutputStream stream = new BufferedOutputStream(new FileOutputStream(propFile))){
             XMLStreamWriter writer = XMLUtils.createWriter(stream);
             XMLUtils.startXmlDocument(writer);
             XMLConverter.writeObject(writer, CmisVersion.CMIS_1_1, true, "object", XMLConstants.NAMESPACE_CMIS, object);
             XMLUtils.endXmlDocument(writer);
             writer.close();
-        } catch (Exception e) {
+        }
+        catch (IOException | XMLStreamException e){
             throw new CmisStorageException("Couldn't store properties!", e);
-        } finally {
-            IOUtils.closeQuietly(stream);
         }
     }
 
