@@ -19,6 +19,7 @@
 package org.apache.chemistry.opencmis.fileshare;
 
 import cz.muni.fi.editor.cmisserver.AdditionalTypemanager;
+import cz.muni.fi.editor.cmisserver.QueryParser;
 import org.apache.chemistry.opencmis.commons.BasicPermissions;
 import org.apache.chemistry.opencmis.commons.PropertyIds;
 import org.apache.chemistry.opencmis.commons.data.*;
@@ -134,7 +135,7 @@ public class FileShareRepository {
         capabilities.setSupportsVersionSpecificFiling(false);
         capabilities.setIsPwcSearchable(false);
         capabilities.setIsPwcUpdatable(false);
-        capabilities.setCapabilityQuery(CapabilityQuery.NONE);
+        capabilities.setCapabilityQuery(CapabilityQuery.METADATAONLY);
         capabilities.setCapabilityChanges(CapabilityChanges.NONE);
         capabilities.setCapabilityContentStreamUpdates(CapabilityContentStreamUpdates.ANYTIME);
         capabilities.setSupportsGetDescendants(true);
@@ -156,8 +157,8 @@ public class FileShareRepository {
             typeSetAttributes.setCanSetIncludedInSupertypeQuery(false);
             typeSetAttributes.setCanSetLocalName(false);
             typeSetAttributes.setCanSetLocalNamespace(false);
-            typeSetAttributes.setCanSetQueryable(false);
-            typeSetAttributes.setCanSetQueryName(false);
+            typeSetAttributes.setCanSetQueryable(true);
+            typeSetAttributes.setCanSetQueryName(true);
 
             capabilities.setNewTypeSettableAttributes(typeSetAttributes);
 
@@ -1400,7 +1401,11 @@ public class FileShareRepository {
     // discovery
 
     public ObjectList query(String repositoryId, String statement, Boolean searchAllVersions, Boolean includeAllowableActions, IncludeRelationships includeRelationships, String renditionFilter, BigInteger maxItems, BigInteger skipCount, ExtensionsData extension){
-        throw new UnsupportedOperationException("not yet");
+        LOG.info("Query run. b4 parser");
+        QueryParser parser = new QueryParser();
+        LOG.info("pareser created");
+        return parser.query(typeManager,null,repositoryId,statement,searchAllVersions,includeAllowableActions,includeRelationships,renditionFilter
+        ,maxItems,skipCount);
     }
 
     // --- helpers ---
