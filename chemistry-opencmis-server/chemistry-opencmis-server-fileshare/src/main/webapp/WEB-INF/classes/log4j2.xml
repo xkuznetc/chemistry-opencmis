@@ -28,5 +28,6 @@
 			<AppenderRef ref="STDOUT" />
 		</Root>
 		<Logger name="org.apache.chemistry.opencmis.fileshare" level="info" />
+		<Logger name="cz.muni.fi.editor.cmisserver" level="debug" />
 	</Loggers>
 </Configuration>
