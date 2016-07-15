@@ -1,4 +1,4 @@
-package cz.muni.fi.editor.cmisserver;
+package cz.muni.fi.editor.cmisserver.lucene;
 
 import org.apache.lucene.document.Document;
 import org.apache.lucene.search.Query;

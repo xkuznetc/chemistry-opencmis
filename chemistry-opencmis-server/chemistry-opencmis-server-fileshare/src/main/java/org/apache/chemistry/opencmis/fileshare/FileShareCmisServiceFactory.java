@@ -18,15 +18,11 @@
  */
 package org.apache.chemistry.opencmis.fileshare;
 
-import java.math.BigInteger;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-
-import cz.muni.fi.editor.cmisserver.EditorTypeManager;
-import cz.muni.fi.editor.cmisserver.InitializingTypeManager;
-import cz.muni.fi.editor.cmisserver.JSPTypeManager;
+import cz.muni.fi.editor.cmisserver.lucene.LuceneService;
+import cz.muni.fi.editor.cmisserver.lucene.LuceneServiceFactory;
+import cz.muni.fi.editor.cmisserver.types.EditorTypeManager;
+import cz.muni.fi.editor.cmisserver.types.InitializingTypeManager;
+import cz.muni.fi.editor.cmisserver.types.JSPTypeManager;
 import org.apache.chemistry.opencmis.commons.impl.server.AbstractServiceFactory;
 import org.apache.chemistry.opencmis.commons.server.CallContext;
 import org.apache.chemistry.opencmis.commons.server.CmisService;
@@ -36,6 +32,14 @@ import org.apache.chemistry.opencmis.server.support.wrapper.CmisServiceWrapperMa
 import org.apache.chemistry.opencmis.server.support.wrapper.ConformanceCmisServiceWrapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
+import java.math.BigInteger;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 
 /**
  * FileShare Service Factory.
@@ -72,6 +76,7 @@ public class FileShareCmisServiceFactory extends AbstractServiceFactory {
     private FileShareUserManager userManager;
     private TypeManager typeManager;
     private CmisServiceWrapperManager wrapperManager;
+    private LuceneService luceneService;
 
     public FileShareRepositoryManager getRepositoryManager() {
         return repositoryManager;
@@ -103,6 +108,14 @@ public class FileShareCmisServiceFactory extends AbstractServiceFactory {
     @Override
     public void destroy() {
         threadLocalService = null;
+        try
+        {
+            luceneService.close();
+        }
+        catch (IOException e)
+        {
+            LOG.error(e.getMessage());
+        }
     }
 
     @Override
@@ -215,7 +228,17 @@ public class FileShareCmisServiceFactory extends AbstractServiceFactory {
 
                     LOG.info("Adding repository '{}': {}", repositoryId, root);
 
-                    FileShareRepository fsr = new FileShareRepository(repositoryId, root, typeManager);
+
+                    try
+                    {
+                        luceneService = LuceneServiceFactory.getInstance(Paths.get("/opt/opencmis/index/"));
+                    }
+                    catch (IOException e)
+                    {
+                        LOG.error(e.getMessage());
+                    }
+
+                    FileShareRepository fsr = new FileShareRepository(repositoryId, root, typeManager, luceneService);
                     repositoryManager.addRepository(fsr);
                 }
             }
