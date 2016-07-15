@@ -1,4 +1,4 @@
-package cz.muni.fi.editor.cmisserver;
+package cz.muni.fi.editor.cmisserver.types;
 
 import javax.xml.stream.XMLStreamException;
 import java.io.IOException;

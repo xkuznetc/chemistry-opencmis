@@ -12,6 +12,7 @@
 hs_err_pid*
 
 target/
+overlays
 
 nb-configuration.xml
 .idea

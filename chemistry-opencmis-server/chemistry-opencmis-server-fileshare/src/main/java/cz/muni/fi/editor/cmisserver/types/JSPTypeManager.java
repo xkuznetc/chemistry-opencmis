@@ -1,4 +1,4 @@
-package cz.muni.fi.editor.cmisserver;
+package cz.muni.fi.editor.cmisserver.types;
 
 import org.apache.chemistry.opencmis.commons.definitions.TypeDefinition;
 
