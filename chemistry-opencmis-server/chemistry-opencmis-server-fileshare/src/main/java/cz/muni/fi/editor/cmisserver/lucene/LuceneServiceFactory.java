@@ -3,8 +3,11 @@ package cz.muni.fi.editor.cmisserver.lucene;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.PreDestroy;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * @author Dominik Szalai - emptulik at gmail.com on 12.07.2016.
@@ -12,19 +15,29 @@ import java.nio.file.Path;
 public class LuceneServiceFactory
 {
     private static final Logger LOG = LoggerFactory.getLogger(LuceneServiceFactory.class);
-    private static LuceneService luceneService = null;
+    private Map<Path, LuceneService> luceneServices = new HashMap<>();
 
-    private LuceneServiceFactory()
+    public LuceneService getLuceneService(Path path) throws IOException
     {
+        if (!luceneServices.containsKey(path))
+        {
+            LuceneService luceneService = new LuceneServiceImpl(path);
+            luceneServices.put(path, luceneService);
+
+            return luceneService;
+        }
+        else
+        {
+            return luceneServices.get(path);
+        }
     }
 
-    public static LuceneService getInstance(Path indexLocation) throws IOException
+    @PreDestroy
+    public void destroy() throws IOException
     {
-        if (luceneService == null)
+        for (LuceneService lc : luceneServices.values())
         {
-            luceneService = new LuceneServiceImpl(indexLocation);
+            lc.close();
         }
-
-        return luceneService;
     }
 }

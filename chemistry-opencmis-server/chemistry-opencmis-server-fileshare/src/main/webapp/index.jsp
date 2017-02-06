@@ -1,8 +1,8 @@
 <%@ page language="java" contentType="text/html; charset=ISO-8859-1" pageEncoding="ISO-8859-1"%>
-<%@ page import="org.apache.chemistry.opencmis.fileshare.*" %>
+<%@ page import="cz.muni.fi.editor.cmisserver.fileshare.*" %>
 <%@ page import="org.apache.chemistry.opencmis.commons.definitions.*" %>
 <%
-   FileShareCmisServiceFactory factory = (FileShareCmisServiceFactory) application.getAttribute("org.apache.chemistry.opencmis.servicesfactory");
+    EditorCmisServiceFactory factory = (EditorCmisServiceFactory) application.getAttribute("org.apache.chemistry.opencmis.servicesfactory");
 %>
 <!-- 
 /*
@@ -97,7 +97,7 @@
 
 <table>
 <tr><th>Repository Id</th><th>Root Directory</th></tr>
-<% for (FileShareRepository fsr: factory.getRepositoryManager().getRepositories()) { %>
+<% for (Repository fsr: factory.getRepositoryManager().getRepositories()) { %>
 <tr><td><%= fsr.getRepositoryId() %></td><td><%= fsr.getRootDirectory() %></td></tr>
 <% } %>
 </table>

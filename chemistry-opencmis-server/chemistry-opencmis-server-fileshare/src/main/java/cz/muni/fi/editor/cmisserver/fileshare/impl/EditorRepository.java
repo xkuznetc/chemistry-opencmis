@@ -1,23 +1,6 @@
-/*
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
-package org.apache.chemistry.opencmis.fileshare;
+package cz.muni.fi.editor.cmisserver.fileshare.impl;
 
+import cz.muni.fi.editor.cmisserver.fileshare.Repository;
 import cz.muni.fi.editor.cmisserver.lucene.LuceneService;
 import cz.muni.fi.editor.cmisserver.query.QueryParser;
 import cz.muni.fi.editor.cmisserver.query.QueryParserFactory;
@@ -30,13 +13,14 @@ import org.apache.chemistry.opencmis.commons.data.Properties;
 import org.apache.chemistry.opencmis.commons.definitions.*;
 import org.apache.chemistry.opencmis.commons.enums.*;
 import org.apache.chemistry.opencmis.commons.exceptions.*;
-import org.apache.chemistry.opencmis.commons.impl.Base64;
 import org.apache.chemistry.opencmis.commons.impl.*;
 import org.apache.chemistry.opencmis.commons.impl.dataobjects.*;
 import org.apache.chemistry.opencmis.commons.impl.server.ObjectInfoImpl;
 import org.apache.chemistry.opencmis.commons.server.CallContext;
 import org.apache.chemistry.opencmis.commons.server.ObjectInfoHandler;
 import org.apache.chemistry.opencmis.commons.spi.Holder;
+import org.apache.chemistry.opencmis.fileshare.ContentRangeInputStream;
+import org.apache.chemistry.opencmis.fileshare.FileShareUtils;
 import org.apache.chemistry.opencmis.server.impl.ServerVersion;
 import org.apache.chemistry.opencmis.server.support.TypeManager;
 import org.apache.lucene.document.Document;
@@ -52,16 +36,16 @@ import javax.xml.stream.XMLStreamWriter;
 import java.io.*;
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.*;
 
 /**
- * Implements all repository operations.
+ * Created by emptak on 2/6/17.
  */
-@SuppressWarnings("ALL")
-public class FileShareRepository
+public class EditorRepository implements Repository
 {
-
-    private static final Logger LOG = LoggerFactory.getLogger(FileShareRepository.class);
+    private static final Logger LOG = LoggerFactory.getLogger(EditorRepository.class);
 
     private static final String ROOT_ID = "@root@";
     private static final String SHADOW_EXT = ".cmis.xml";
@@ -74,35 +58,35 @@ public class FileShareRepository
     /**
      * Repository id.
      */
-    private final String repositoryId;
+    private String repositoryId;
     /**
      * Root directory.
      */
-    private final File root;
+    private Path root;
     /**
      * Types.
      */
-    private final TypeManager typeManager;
+    private TypeManager typeManager;
     /**
      * Users.
      */
-    private final Map<String, Boolean> readWriteUserMap;
+    private Map<String, Boolean> readWriteUserMap = new HashMap<>();
 
     /**
      * CMIS 1.0 repository info.
      */
-    private final RepositoryInfo repositoryInfo10;
+    private RepositoryInfo repositoryInfo10;
     /**
      * CMIS 1.1 repository info.
      */
-    private final RepositoryInfo repositoryInfo11;
+    private RepositoryInfo repositoryInfo11;
 
-    private final LuceneService luceneService;
+    private LuceneService luceneService;
+
     private QueryParserFactory qps = new QueryParserFactory();
 
-    public FileShareRepository(final String repositoryId, final String rootPath, final TypeManager typeManager, final LuceneService luceneService)
+    public EditorRepository(String repositoryId, Path root, TypeManager typeManager, LuceneService luceneService, List<String> readWriteUsers, List<String> readOnlyUsers)
     {
-        // check repository id
         if (repositoryId == null || repositoryId.trim().length() == 0)
         {
             throw new IllegalArgumentException("Invalid repository id!");
@@ -110,159 +94,48 @@ public class FileShareRepository
 
         this.repositoryId = repositoryId;
 
-        // check root folder
-        if (rootPath == null || rootPath.trim().length() == 0)
+        if (root == null)
         {
-            throw new IllegalArgumentException("Invalid root folder!");
+            throw new IllegalArgumentException("Invalid root folder.");
+        }
+        if (!Files.exists(root))
+        {
+            throw new IllegalArgumentException("Given root folder does not exist");
+        }
+        if (!Files.isDirectory(root))
+        {
+            throw new IllegalArgumentException("Given root is not a directory.");
         }
 
-        root = new File(rootPath);
-        if (!root.isDirectory())
+        this.root = root;
+        if (typeManager == null)
         {
-            throw new IllegalArgumentException("Root is not a directory!");
+            throw new IllegalStateException("Type manager is null. Call .setTypeManager first");
         }
-
-        // set type manager objects
         this.typeManager = typeManager;
+        if (luceneService == null)
+        {
+            throw new IllegalStateException("Lucene service is not set. Call setLuceneService first.");
+        }
+        this.luceneService = luceneService;
 
-        // set up read-write user map
-        readWriteUserMap = new HashMap<String, Boolean>();
+        for (String rw : readWriteUsers)
+        {
+            this.readWriteUserMap.put(rw, false);
+        }
+        for (String ro : readOnlyUsers)
+        {
+            this.readWriteUserMap.put(ro, true);
+        }
 
-        // set up repository infos
         repositoryInfo10 = createRepositoryInfo(CmisVersion.CMIS_1_0);
         repositoryInfo11 = createRepositoryInfo(CmisVersion.CMIS_1_1);
-
-        this.luceneService = luceneService;
-    }
-
-    private RepositoryInfo createRepositoryInfo(CmisVersion cmisVersion)
-    {
-        assert cmisVersion != null;
-
-        RepositoryInfoImpl repositoryInfo = new RepositoryInfoImpl();
-
-        repositoryInfo.setId(repositoryId);
-        repositoryInfo.setName(repositoryId);
-        repositoryInfo.setDescription(repositoryId);
-
-        repositoryInfo.setCmisVersionSupported(cmisVersion.value());
-
-        repositoryInfo.setProductName("OpenCMIS FileShare");
-        repositoryInfo.setProductVersion(ServerVersion.OPENCMIS_VERSION);
-        repositoryInfo.setVendorName("OpenCMIS");
-
-        repositoryInfo.setRootFolder(ROOT_ID);
-
-        repositoryInfo.setThinClientUri("");
-        repositoryInfo.setChangesIncomplete(true);
-
-        RepositoryCapabilitiesImpl capabilities = new RepositoryCapabilitiesImpl();
-        capabilities.setCapabilityAcl(CapabilityAcl.DISCOVER);
-        capabilities.setAllVersionsSearchable(false);
-        capabilities.setCapabilityJoin(CapabilityJoin.NONE);
-        capabilities.setSupportsMultifiling(false);
-        capabilities.setSupportsUnfiling(false);
-        capabilities.setSupportsVersionSpecificFiling(false);
-        capabilities.setIsPwcSearchable(false);
-        capabilities.setIsPwcUpdatable(false);
-        capabilities.setCapabilityQuery(CapabilityQuery.METADATAONLY);
-        capabilities.setCapabilityChanges(CapabilityChanges.NONE);
-        capabilities.setCapabilityContentStreamUpdates(CapabilityContentStreamUpdates.ANYTIME);
-        capabilities.setSupportsGetDescendants(true);
-        capabilities.setSupportsGetFolderTree(true);
-        capabilities.setCapabilityRendition(CapabilityRenditions.NONE);
-
-        if (cmisVersion != CmisVersion.CMIS_1_0)
-        {
-            capabilities.setCapabilityOrderBy(CapabilityOrderBy.COMMON);
-
-            NewTypeSettableAttributesImpl typeSetAttributes = new NewTypeSettableAttributesImpl();
-            typeSetAttributes.setCanSetControllableAcl(false);
-            typeSetAttributes.setCanSetControllablePolicy(false);
-            typeSetAttributes.setCanSetCreatable(false);
-            typeSetAttributes.setCanSetDescription(false);
-            typeSetAttributes.setCanSetDisplayName(false);
-            typeSetAttributes.setCanSetFileable(false);
-            typeSetAttributes.setCanSetFulltextIndexed(false);
-            typeSetAttributes.setCanSetId(false);
-            typeSetAttributes.setCanSetIncludedInSupertypeQuery(false);
-            typeSetAttributes.setCanSetLocalName(false);
-            typeSetAttributes.setCanSetLocalNamespace(false);
-            typeSetAttributes.setCanSetQueryable(true);
-            typeSetAttributes.setCanSetQueryName(true);
-
-            capabilities.setNewTypeSettableAttributes(typeSetAttributes);
-
-            CreatablePropertyTypesImpl creatablePropertyTypes = new CreatablePropertyTypesImpl();
-            capabilities.setCreatablePropertyTypes(creatablePropertyTypes);
-        }
-
-        repositoryInfo.setCapabilities(capabilities);
-
-        AclCapabilitiesDataImpl aclCapability = new AclCapabilitiesDataImpl();
-        aclCapability.setSupportedPermissions(SupportedPermissions.BASIC);
-        aclCapability.setAclPropagation(AclPropagation.OBJECTONLY);
-
-        // permissions
-        List<PermissionDefinition> permissions = new ArrayList<>();
-        permissions.add(createPermission(BasicPermissions.READ, "Read"));
-        permissions.add(createPermission(BasicPermissions.WRITE, "Write"));
-        permissions.add(createPermission(BasicPermissions.ALL, "All"));
-        aclCapability.setPermissionDefinitionData(permissions);
-
-        // mapping
-        List<PermissionMapping> list = new ArrayList<>();
-        list.add(createMapping(PermissionMapping.CAN_CREATE_DOCUMENT_FOLDER, BasicPermissions.READ));
-        list.add(createMapping(PermissionMapping.CAN_CREATE_FOLDER_FOLDER, BasicPermissions.READ));
-        list.add(createMapping(PermissionMapping.CAN_DELETE_CONTENT_DOCUMENT, BasicPermissions.WRITE));
-        list.add(createMapping(PermissionMapping.CAN_DELETE_OBJECT, BasicPermissions.ALL));
-        list.add(createMapping(PermissionMapping.CAN_DELETE_TREE_FOLDER, BasicPermissions.ALL));
-        list.add(createMapping(PermissionMapping.CAN_GET_ACL_OBJECT, BasicPermissions.READ));
-        list.add(createMapping(PermissionMapping.CAN_GET_ALL_VERSIONS_VERSION_SERIES, BasicPermissions.READ));
-        list.add(createMapping(PermissionMapping.CAN_GET_CHILDREN_FOLDER, BasicPermissions.READ));
-        list.add(createMapping(PermissionMapping.CAN_GET_DESCENDENTS_FOLDER, BasicPermissions.READ));
-        list.add(createMapping(PermissionMapping.CAN_GET_FOLDER_PARENT_OBJECT, BasicPermissions.READ));
-        list.add(createMapping(PermissionMapping.CAN_GET_PARENTS_FOLDER, BasicPermissions.READ));
-        list.add(createMapping(PermissionMapping.CAN_GET_PROPERTIES_OBJECT, BasicPermissions.READ));
-        list.add(createMapping(PermissionMapping.CAN_MOVE_OBJECT, BasicPermissions.WRITE));
-        list.add(createMapping(PermissionMapping.CAN_MOVE_SOURCE, BasicPermissions.READ));
-        list.add(createMapping(PermissionMapping.CAN_MOVE_TARGET, BasicPermissions.WRITE));
-        list.add(createMapping(PermissionMapping.CAN_SET_CONTENT_DOCUMENT, BasicPermissions.WRITE));
-        list.add(createMapping(PermissionMapping.CAN_UPDATE_PROPERTIES_OBJECT, BasicPermissions.WRITE));
-        list.add(createMapping(PermissionMapping.CAN_VIEW_CONTENT_OBJECT, BasicPermissions.READ));
-        Map<String, PermissionMapping> map = new LinkedHashMap<>();
-        for (PermissionMapping pm : list)
-        {
-            map.put(pm.getKey(), pm);
-        }
-        aclCapability.setPermissionMappingData(map);
-
-        repositoryInfo.setAclCapabilities(aclCapability);
-
-        return repositoryInfo;
-    }
-
-    private PermissionDefinition createPermission(String permission, String description)
-    {
-        PermissionDefinitionDataImpl pd = new PermissionDefinitionDataImpl();
-        pd.setId(permission);
-        pd.setDescription(description);
-
-        return pd;
-    }
-
-    private PermissionMapping createMapping(String key, String permission)
-    {
-        PermissionMappingDataImpl pm = new PermissionMappingDataImpl();
-        pm.setKey(key);
-        pm.setPermissions(Collections.singletonList(permission));
-
-        return pm;
     }
 
     /**
      * Returns the id of this repository.
      */
+    @Override
     public String getRepositoryId()
     {
         return repositoryId;
@@ -271,42 +144,16 @@ public class FileShareRepository
     /**
      * Returns the root directory of this repository
      */
+    @Override
     public File getRootDirectory()
     {
-        return root;
+        return root.toFile();
     }
-
-    /**
-     * Sets read-only flag for the given user.
-     */
-    public void setUserReadOnly(String user)
-    {
-        if (user == null || user.length() == 0)
-        {
-            return;
-        }
-
-        readWriteUserMap.put(user, true);
-    }
-
-    /**
-     * Sets read-write flag for the given user.
-     */
-    public void setUserReadWrite(String user)
-    {
-        if (user == null || user.length() == 0)
-        {
-            return;
-        }
-
-        readWriteUserMap.put(user, false);
-    }
-
-    // --- CMIS operations ---
 
     /**
      * CMIS getRepositoryInfo.
      */
+    @Override
     public RepositoryInfo getRepositoryInfo(CallContext context)
     {
         debug("getRepositoryInfo");
@@ -326,6 +173,7 @@ public class FileShareRepository
     /**
      * CMIS getTypesChildren.
      */
+    @Override
     public TypeDefinitionList getTypeChildren(CallContext context, String typeId, Boolean includePropertyDefinitions,
                                               BigInteger maxItems, BigInteger skipCount)
     {
@@ -338,6 +186,7 @@ public class FileShareRepository
     /**
      * CMIS getTypesDescendants.
      */
+    @Override
     public List<TypeDefinitionContainer> getTypeDescendants(CallContext context, String typeId, BigInteger depth,
                                                             Boolean includePropertyDefinitions)
     {
@@ -350,6 +199,7 @@ public class FileShareRepository
     /**
      * CMIS getTypeDefinition.
      */
+    @Override
     public TypeDefinition getTypeDefinition(CallContext context, String typeId)
     {
         debug("getTypeDefinition");
@@ -361,6 +211,7 @@ public class FileShareRepository
     /**
      * Create* dispatch for AtomPub.
      */
+    @Override
     public ObjectData create(CallContext context, Properties properties, String folderId, ContentStream contentStream,
                              VersioningState versioningState, ObjectInfoHandler objectInfos)
     {
@@ -399,6 +250,7 @@ public class FileShareRepository
     /**
      * CMIS createDocument.
      */
+    @Override
     public String createDocument(CallContext context, Properties properties, String folderId,
                                  ContentStream contentStream, VersioningState versioningState)
     {
@@ -482,6 +334,7 @@ public class FileShareRepository
     /**
      * CMIS createDocumentFromSource.
      */
+    @Override
     public String createDocumentFromSource(CallContext context, String sourceId, Properties properties,
                                            String folderId, VersioningState versioningState)
     {
@@ -652,6 +505,7 @@ public class FileShareRepository
     /**
      * CMIS createFolder.
      */
+    @Override
     public String createFolder(CallContext context, Properties properties, String folderId)
     {
         debug("createFolder");
@@ -719,6 +573,7 @@ public class FileShareRepository
     /**
      * CMIS moveObject.
      */
+    @Override
     public ObjectData moveObject(CallContext context, Holder<String> objectId, String targetFolderId,
                                  ObjectInfoHandler objectInfos)
     {
@@ -772,6 +627,7 @@ public class FileShareRepository
     /**
      * CMIS setContentStream, deleteContentStream, and appendContentStream.
      */
+    @Override
     public void changeContentStream(CallContext context, Holder<String> objectId, Boolean overwriteFlag,
                                     ContentStream contentStream, boolean append)
     {
@@ -820,6 +676,7 @@ public class FileShareRepository
     /**
      * CMIS deleteObject.
      */
+    @Override
     public void deleteObject(CallContext context, String objectId)
     {
         debug("deleteObject");
@@ -849,6 +706,7 @@ public class FileShareRepository
     /**
      * CMIS deleteTree.
      */
+    @Override
     public FailedToDeleteData deleteTree(CallContext context, String folderId, Boolean continueOnFailure)
     {
         debug("deleteTree");
@@ -921,6 +779,7 @@ public class FileShareRepository
     /**
      * CMIS updateProperties.
      */
+    @Override
     public ObjectData updateProperties(CallContext context, Holder<String> objectId, Properties properties,
                                        ObjectInfoHandler objectInfos)
     {
@@ -1094,6 +953,7 @@ public class FileShareRepository
     /**
      * CMIS bulkUpdateProperties.
      */
+    @Override
     public List<BulkUpdateObjectIdAndChangeToken> bulkUpdateProperties(CallContext context,
                                                                        List<BulkUpdateObjectIdAndChangeToken> objectIdAndChangeToken, Properties properties,
                                                                        ObjectInfoHandler objectInfos)
@@ -1134,6 +994,7 @@ public class FileShareRepository
     /**
      * CMIS getObject.
      */
+    @Override
     public ObjectData getObject(CallContext context, String objectId, String versionServicesId, String filter,
                                 Boolean includeAllowableActions, Boolean includeAcl, ObjectInfoHandler objectInfos)
     {
@@ -1170,6 +1031,7 @@ public class FileShareRepository
     /**
      * CMIS getAllowableActions.
      */
+    @Override
     public AllowableActions getAllowableActions(CallContext context, String objectId)
     {
         debug("getAllowableActions");
@@ -1187,6 +1049,7 @@ public class FileShareRepository
     /**
      * CMIS getACL.
      */
+    @Override
     public Acl getAcl(CallContext context, String objectId)
     {
         debug("getAcl");
@@ -1205,6 +1068,7 @@ public class FileShareRepository
     /**
      * CMIS getContentStream.
      */
+    @Override
     public ContentStream getContentStream(CallContext context, String objectId, BigInteger offset, BigInteger length)
     {
         debug("getContentStream");
@@ -1258,6 +1122,7 @@ public class FileShareRepository
     /**
      * CMIS getChildren.
      */
+    @Override
     public ObjectInFolderList getChildren(CallContext context, String folderId, String filter, String orderBy,
                                           Boolean includeAllowableActions, Boolean includePathSegment, BigInteger maxItems, BigInteger skipCount,
                                           ObjectInfoHandler objectInfos)
@@ -1461,6 +1326,7 @@ public class FileShareRepository
     /**
      * CMIS getDescendants.
      */
+    @Override
     public List<ObjectInFolderContainer> getDescendants(CallContext context, String folderId, BigInteger depth,
                                                         String filter, Boolean includeAllowableActions, Boolean includePathSegment, ObjectInfoHandler objectInfos,
                                                         boolean foldersOnly)
@@ -1559,6 +1425,7 @@ public class FileShareRepository
     /**
      * CMIS getFolderParent.
      */
+    @Override
     public ObjectData getFolderParent(CallContext context, String folderId, String filter, ObjectInfoHandler objectInfos)
     {
         List<ObjectParentData> parents = getObjectParents(context, folderId, filter, false, false, objectInfos);
@@ -1574,6 +1441,7 @@ public class FileShareRepository
     /**
      * CMIS getObjectParents.
      */
+    @Override
     public List<ObjectParentData> getObjectParents(CallContext context, String objectId, String filter,
                                                    Boolean includeAllowableActions, Boolean includeRelativePathSegment, ObjectInfoHandler objectInfos)
     {
@@ -1591,7 +1459,7 @@ public class FileShareRepository
         File file = getFile(objectId);
 
         // don't climb above the root folder
-        if (root.equals(file))
+        if (root.toFile().equals(file))
         {
             return Collections.emptyList();
         }
@@ -1619,6 +1487,7 @@ public class FileShareRepository
     /**
      * CMIS getObjectByPath.
      */
+    @Override
     public ObjectData getObjectByPath(CallContext context, String folderPath, String filter,
                                       boolean includeAllowableActions, boolean includeACL, ObjectInfoHandler objectInfos)
     {
@@ -1638,12 +1507,12 @@ public class FileShareRepository
         File file = null;
         if (folderPath.length() == 1)
         {
-            file = root;
+            file = root.toFile();
         }
         else
         {
             String path = folderPath.replace('/', File.separatorChar).substring(1);
-            file = new File(root, path);
+            file = new File(root.toFile(), path);
         }
 
         if (!file.exists())
@@ -1657,6 +1526,7 @@ public class FileShareRepository
 
     // discovery
 
+    @Override
     public ObjectList query(String repositoryId, String statement, Boolean searchAllVersions, Boolean includeAllowableActions, IncludeRelationships includeRelationships, String renditionFilter, BigInteger maxItems, BigInteger skipCount, ExtensionsData extension)
     {
         QueryParser qp = qps.getQueryParser();
@@ -1823,10 +1693,10 @@ public class FileShareRepository
                 addPropertyString(result, typeId, filter, PropertyIds.PATH, path);
 
                 // folder properties
-                if (!root.equals(file))
+                if (!root.toFile().equals(file))
                 {
                     addPropertyId(result, typeId, filter, PropertyIds.PARENT_ID,
-                            (root.equals(file.getParentFile()) ? ROOT_ID : fileToId(file.getParentFile())));
+                            (root.toFile().equals(file.getParentFile()) ? ROOT_ID : fileToId(file.getParentFile())));
                     objectInfo.setHasParent(true);
                 }
                 else
@@ -2308,7 +2178,7 @@ public class FileShareRepository
 
         boolean isReadOnly = !file.canWrite();
         boolean isFolder = file.isDirectory();
-        boolean isRoot = root.equals(file);
+        boolean isRoot = root.toFile().equals(file);
 
         Set<Action> aas = EnumSet.noneOf(Action.class);
 
@@ -2497,10 +2367,10 @@ public class FileShareRepository
 
         if (id.equals(ROOT_ID))
         {
-            return root;
+            return root.toFile();
         }
 
-        return new File(root, (new String(Base64.decode(id.getBytes("US-ASCII")), "UTF-8")).replace('/',
+        return new File(root.toFile(), (new String(org.apache.chemistry.opencmis.commons.impl.Base64.decode(id.getBytes("US-ASCII")), "UTF-8")).replace('/',
                 File.separatorChar));
     }
 
@@ -2530,19 +2400,19 @@ public class FileShareRepository
             throw new IllegalArgumentException("File is not valid!");
         }
 
-        if (root.equals(file))
+        if (root.toFile().equals(file))
         {
             return ROOT_ID;
         }
 
         String path = getRepositoryPath(file);
 
-        return Base64.encodeBytes(path.getBytes("UTF-8"));
+        return org.apache.chemistry.opencmis.commons.impl.Base64.encodeBytes(path.getBytes("UTF-8"));
     }
 
     private String getRepositoryPath(File file)
     {
-        String path = file.getAbsolutePath().substring(root.getAbsolutePath().length())
+        String path = file.getAbsolutePath().substring(root.toFile().getAbsolutePath().length())
                 .replace(File.separatorChar, '/');
         if (path.length() == 0)
         {
@@ -2561,5 +2431,130 @@ public class FileShareRepository
         {
             LOG.debug("<{}> {}", repositoryId, msg);
         }
+    }
+
+    private RepositoryInfo createRepositoryInfo(CmisVersion cmisVersion)
+    {
+        assert cmisVersion != null;
+
+        RepositoryInfoImpl repositoryInfo = new RepositoryInfoImpl();
+
+        repositoryInfo.setId(repositoryId);
+        repositoryInfo.setName(repositoryId);
+        repositoryInfo.setDescription(repositoryId);
+
+        repositoryInfo.setCmisVersionSupported(cmisVersion.value());
+
+        repositoryInfo.setProductName("OpenCMIS FileShare");
+        repositoryInfo.setProductVersion(ServerVersion.OPENCMIS_VERSION);
+        repositoryInfo.setVendorName("OpenCMIS");
+
+        repositoryInfo.setRootFolder(ROOT_ID);
+
+        repositoryInfo.setThinClientUri("");
+        repositoryInfo.setChangesIncomplete(true);
+
+        RepositoryCapabilitiesImpl capabilities = new RepositoryCapabilitiesImpl();
+        capabilities.setCapabilityAcl(CapabilityAcl.DISCOVER);
+        capabilities.setAllVersionsSearchable(false);
+        capabilities.setCapabilityJoin(CapabilityJoin.NONE);
+        capabilities.setSupportsMultifiling(false);
+        capabilities.setSupportsUnfiling(false);
+        capabilities.setSupportsVersionSpecificFiling(false);
+        capabilities.setIsPwcSearchable(false);
+        capabilities.setIsPwcUpdatable(false);
+        capabilities.setCapabilityQuery(CapabilityQuery.METADATAONLY);
+        capabilities.setCapabilityChanges(CapabilityChanges.NONE);
+        capabilities.setCapabilityContentStreamUpdates(CapabilityContentStreamUpdates.ANYTIME);
+        capabilities.setSupportsGetDescendants(true);
+        capabilities.setSupportsGetFolderTree(true);
+        capabilities.setCapabilityRendition(CapabilityRenditions.NONE);
+
+        if (cmisVersion != CmisVersion.CMIS_1_0)
+        {
+            capabilities.setCapabilityOrderBy(CapabilityOrderBy.COMMON);
+
+            NewTypeSettableAttributesImpl typeSetAttributes = new NewTypeSettableAttributesImpl();
+            typeSetAttributes.setCanSetControllableAcl(false);
+            typeSetAttributes.setCanSetControllablePolicy(false);
+            typeSetAttributes.setCanSetCreatable(false);
+            typeSetAttributes.setCanSetDescription(false);
+            typeSetAttributes.setCanSetDisplayName(false);
+            typeSetAttributes.setCanSetFileable(false);
+            typeSetAttributes.setCanSetFulltextIndexed(false);
+            typeSetAttributes.setCanSetId(false);
+            typeSetAttributes.setCanSetIncludedInSupertypeQuery(false);
+            typeSetAttributes.setCanSetLocalName(false);
+            typeSetAttributes.setCanSetLocalNamespace(false);
+            typeSetAttributes.setCanSetQueryable(true);
+            typeSetAttributes.setCanSetQueryName(true);
+
+            capabilities.setNewTypeSettableAttributes(typeSetAttributes);
+
+            CreatablePropertyTypesImpl creatablePropertyTypes = new CreatablePropertyTypesImpl();
+            capabilities.setCreatablePropertyTypes(creatablePropertyTypes);
+        }
+
+        repositoryInfo.setCapabilities(capabilities);
+
+        AclCapabilitiesDataImpl aclCapability = new AclCapabilitiesDataImpl();
+        aclCapability.setSupportedPermissions(SupportedPermissions.BASIC);
+        aclCapability.setAclPropagation(AclPropagation.OBJECTONLY);
+
+        // permissions
+        List<PermissionDefinition> permissions = new ArrayList<>();
+        permissions.add(createPermission(BasicPermissions.READ, "Read"));
+        permissions.add(createPermission(BasicPermissions.WRITE, "Write"));
+        permissions.add(createPermission(BasicPermissions.ALL, "All"));
+        aclCapability.setPermissionDefinitionData(permissions);
+
+        // mapping
+        List<PermissionMapping> list = new ArrayList<>();
+        list.add(createMapping(PermissionMapping.CAN_CREATE_DOCUMENT_FOLDER, BasicPermissions.READ));
+        list.add(createMapping(PermissionMapping.CAN_CREATE_FOLDER_FOLDER, BasicPermissions.READ));
+        list.add(createMapping(PermissionMapping.CAN_DELETE_CONTENT_DOCUMENT, BasicPermissions.WRITE));
+        list.add(createMapping(PermissionMapping.CAN_DELETE_OBJECT, BasicPermissions.ALL));
+        list.add(createMapping(PermissionMapping.CAN_DELETE_TREE_FOLDER, BasicPermissions.ALL));
+        list.add(createMapping(PermissionMapping.CAN_GET_ACL_OBJECT, BasicPermissions.READ));
+        list.add(createMapping(PermissionMapping.CAN_GET_ALL_VERSIONS_VERSION_SERIES, BasicPermissions.READ));
+        list.add(createMapping(PermissionMapping.CAN_GET_CHILDREN_FOLDER, BasicPermissions.READ));
+        list.add(createMapping(PermissionMapping.CAN_GET_DESCENDENTS_FOLDER, BasicPermissions.READ));
+        list.add(createMapping(PermissionMapping.CAN_GET_FOLDER_PARENT_OBJECT, BasicPermissions.READ));
+        list.add(createMapping(PermissionMapping.CAN_GET_PARENTS_FOLDER, BasicPermissions.READ));
+        list.add(createMapping(PermissionMapping.CAN_GET_PROPERTIES_OBJECT, BasicPermissions.READ));
+        list.add(createMapping(PermissionMapping.CAN_MOVE_OBJECT, BasicPermissions.WRITE));
+        list.add(createMapping(PermissionMapping.CAN_MOVE_SOURCE, BasicPermissions.READ));
+        list.add(createMapping(PermissionMapping.CAN_MOVE_TARGET, BasicPermissions.WRITE));
+        list.add(createMapping(PermissionMapping.CAN_SET_CONTENT_DOCUMENT, BasicPermissions.WRITE));
+        list.add(createMapping(PermissionMapping.CAN_UPDATE_PROPERTIES_OBJECT, BasicPermissions.WRITE));
+        list.add(createMapping(PermissionMapping.CAN_VIEW_CONTENT_OBJECT, BasicPermissions.READ));
+        Map<String, PermissionMapping> map = new LinkedHashMap<>();
+        for (PermissionMapping pm : list)
+        {
+            map.put(pm.getKey(), pm);
+        }
+        aclCapability.setPermissionMappingData(map);
+
+        repositoryInfo.setAclCapabilities(aclCapability);
+
+        return repositoryInfo;
+    }
+
+    private PermissionDefinition createPermission(String permission, String description)
+    {
+        PermissionDefinitionDataImpl pd = new PermissionDefinitionDataImpl();
+        pd.setId(permission);
+        pd.setDescription(description);
+
+        return pd;
+    }
+
+    private PermissionMapping createMapping(String key, String permission)
+    {
+        PermissionMappingDataImpl pm = new PermissionMappingDataImpl();
+        pm.setKey(key);
+        pm.setPermissions(Collections.singletonList(permission));
+
+        return pm;
     }
 }
