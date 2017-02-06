@@ -130,6 +130,8 @@ public class EditorRepository implements Repository
 
         repositoryInfo10 = createRepositoryInfo(CmisVersion.CMIS_1_0);
         repositoryInfo11 = createRepositoryInfo(CmisVersion.CMIS_1_1);
+
+        this.luceneService = luceneService;
     }
 
     /**
