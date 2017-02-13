@@ -22,11 +22,12 @@ public class EditorRepositoryFactory
         this.typeManager = typeManager;
     }
 
-    public Repository repository(String repositoryId, Path rootFolder, Path indexPath, List<String> readWriteUsers, List<String> readOnlyUsers)
+    public Repository repository(String repositoryId, Path root)
     {
         try
         {
-            return new EditorRepository(repositoryId, rootFolder, typeManager, luceneServiceFactory.getLuceneService(indexPath), readWriteUsers, readOnlyUsers);
+            return new EditorRepository(repositoryId, root, luceneServiceFactory.getLuceneService(root.resolve("index")), typeManager);
+//            return new EditorRepository(repositoryId, rootFolder, typeManager, luceneServiceFactory.getLuceneService(indexPath), readWriteUsers, readOnlyUsers);
         }
         catch (IOException ex)
         {

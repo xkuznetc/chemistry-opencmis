@@ -18,4 +18,6 @@ public interface AdditionalTypemanager
                                        BigInteger maxItems, BigInteger skipCount);
     List<TypeDefinitionContainer> getTypeDescendants(CallContext context, String typeId, BigInteger depth,
                                                      Boolean includePropertyDefinitions);
+
+    TypeDefinition createType(String repositoryId, TypeDefinition type);
 }
