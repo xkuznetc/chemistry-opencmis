@@ -5,6 +5,7 @@ import cz.muni.fi.editor.cmisserver.fileshare.impl.EditorCmisService;
 import cz.muni.fi.editor.cmisserver.fileshare.impl.EditorRepositoryFactory;
 import cz.muni.fi.editor.cmisserver.types.InitializingTypeManager;
 import cz.muni.fi.editor.cmisserver.types.JSPTypeManager;
+import org.apache.chemistry.opencmis.commons.exceptions.CmisRuntimeException;
 import org.apache.chemistry.opencmis.commons.impl.server.AbstractServiceFactory;
 import org.apache.chemistry.opencmis.commons.server.CallContext;
 import org.apache.chemistry.opencmis.commons.server.CmisService;
@@ -18,8 +19,10 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 
+import java.io.IOException;
 import java.math.BigInteger;
 import java.nio.file.FileSystems;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -33,10 +36,11 @@ public class EditorCmisServiceFactory extends AbstractServiceFactory
     private static final Logger LOG = LoggerFactory.getLogger(EditorCmisServiceFactory.class);
     private static final String PREFIX_LOGIN = "login.";
     private static final String PREFIX_REPOSITORY = "repository.";
-    private static final String PREFIX_TYPE = "type.";
-    private static final String SUFFIX_READWRITE = ".readwrite";
-    private static final String SUFFIX_READONLY = ".readonly";
-    private static final String SUFFIX_INDEX = ".index";
+    private static final String EMPTY_PASSWORD = "";
+//    private static final String PREFIX_TYPE = "type.";
+//    private static final String SUFFIX_READWRITE = ".readwrite";
+//    private static final String SUFFIX_READONLY = ".readonly";
+//    private static final String SUFFIX_INDEX = ".index";
 
     /**
      * Default maxItems value for getTypeChildren()}.
@@ -57,7 +61,7 @@ public class EditorCmisServiceFactory extends AbstractServiceFactory
     /**
      * Default depth value for getDescendants().
      */
-    private static final BigInteger DEFAULT_DEPTH_OBJECTS = BigInteger.valueOf(10);
+    private static final BigInteger DEFAULT_DEPTH_OBJECTS = BigInteger.TEN;
 
     /**
      * Each thread gets its own {@link EditorCmisService} instance.
@@ -70,6 +74,7 @@ public class EditorCmisServiceFactory extends AbstractServiceFactory
     private UserManager userManager;
     private TypeManager typeManager;
     private RepositoryManager repositoryManager;
+    private RepositoryValidationService repositoryValidationService;
     private EditorRepositoryFactory editorRepositoryFactory;
 
     public RepositoryManager getRepositoryManager()
@@ -103,6 +108,7 @@ public class EditorCmisServiceFactory extends AbstractServiceFactory
         typeManager = ctx.getBean(TypeManager.class);
         repositoryManager = ctx.getBean(RepositoryManager.class);
         editorRepositoryFactory = ctx.getBean(EditorRepositoryFactory.class);
+        repositoryValidationService = ctx.getBean(RepositoryValidationService.class);
 
         readConfiguration(parameters);
     }
@@ -116,25 +122,16 @@ public class EditorCmisServiceFactory extends AbstractServiceFactory
     @Override
     public CmisService getService(CallContext context)
     {
-        LOG.info("Attempt to get service.");
         userManager.authenticate(context);
-        LOG.info("Authenticated.");
         CallContextAwareCmisService service = threadLocalService.get();
-        LOG.info("Service is null ? {}", service == null);
         if (service == null)
         {
-            EditorCmisService cmisService = ctx.getBean(EditorCmisService.class);
-            LOG.error("Cmis service fetched? {}", cmisService != null);
+            service = (CallContextAwareCmisService) wrapperManager.wrap(ctx.getBean(EditorCmisService.class));
 
-            service = (CallContextAwareCmisService) wrapperManager.wrap(cmisService);
-
-            LOG.error("Service assigned? {}", service != null);
             threadLocalService.set(service);
         }
 
         service.setCallContext(context);
-
-        LOG.info("Service set and will be returned {}", service);
 
         return service;
     }
@@ -143,8 +140,6 @@ public class EditorCmisServiceFactory extends AbstractServiceFactory
     {
         List<String> keys = new ArrayList<>(parameters.keySet());
         Collections.sort(keys);
-
-        List<String> repositories = new ArrayList<>();
 
         for (String key : keys)
         {
@@ -158,7 +153,7 @@ public class EditorCmisServiceFactory extends AbstractServiceFactory
                 }
 
                 String username = usernameAndPassword;
-                String password = "";
+                String password = EMPTY_PASSWORD;
 
                 int x = usernameAndPassword.indexOf(':');
                 if (x > -1)
@@ -171,113 +166,111 @@ public class EditorCmisServiceFactory extends AbstractServiceFactory
 
                 userManager.addLogin(username, password);
             }
-            else if (key.startsWith(PREFIX_TYPE))
+            else if (key.startsWith(PREFIX_REPOSITORY))
             {
-                // load type definition
-                String typeFile = replaceSystemProperties(parameters.get(key).trim());
-                if (typeFile.length() == 0)
-                {
-                    continue;
-                }
-
-                LOG.info("Loading type definition: {}", typeFile);
-
-                if (typeFile.charAt(0) == '/')
-                {
-                    try
-                    {
-                        ((InitializingTypeManager) typeManager).loadTypeDefinitionFromResource(typeFile);
-                        continue;
-                    }
-                    catch (IllegalArgumentException e)
-                    {
-                        // resource not found -> try it as a regular file
-                    }
-                    catch (Exception e)
-                    {
-                        LOG.warn("Could not load type defintion from resource '{}': {}", typeFile, e.getMessage(), e);
-                        continue;
-                    }
-                }
-
+                Path repositoryPath = FileSystems.getDefault().getPath(parameters.get(key));
                 try
                 {
-                    ((InitializingTypeManager) typeManager).loadTypeDefinitionFromFile(typeFile);
+                    repositoryValidationService.load(repositoryPath);
                 }
-                catch (Exception e)
+                catch (IOException ex)
                 {
-                    LOG.warn("Could not load type defintion from file '{}': {}", typeFile, e.getMessage(), e);
+                    throw new CmisRuntimeException(ex.getMessage(), BigInteger.ZERO, ex);
                 }
+
+                repositoryManager.addRepository(editorRepositoryFactory.repository(
+                        getRepositoryId(key),
+                        repositoryPath
+                ));
+
             }
-            else if (key.startsWith(PREFIX_REPOSITORY) && getCharacterOccurenceCount(".", key) == 1)
-            {
-                repositories.add(key);
-                LOG.info("Marking '{}' as repo", key);
-            }
+            // else value is class and we don't process it
         }
+//
 
-        for (String repository : repositories)
-        {
-            List<String> readWriteUsers = getUsersFromValue(parameters.get(repository + SUFFIX_READWRITE));
-            List<String> readOnlyUsers = getUsersFromValue(parameters.get(repository + SUFFIX_READONLY));
-            String indexPath = parameters.get(repository + SUFFIX_INDEX);
-            String root = parameters.get(repository);
-            String repoID = substringAfter(".", repository);
-
-            Repository repo = editorRepositoryFactory.repository(
-                    repoID,
-                    FileSystems.getDefault().getPath(root),
-                    FileSystems.getDefault().getPath(indexPath),
-                    readWriteUsers,
-                    readOnlyUsers
-            );
-
-            LOG.info("=======================================");
-            LOG.info("Read write users are: {}", readWriteUsers);
-            LOG.info("Read only users are: {}", readOnlyUsers);
-            LOG.info("Index for this repo is located at: {}", indexPath);
-            LOG.info("Repo is located at: {}", root);
-            LOG.info("REPOSITORY ++ {} ++ INITIALIZED.", repoID);
-
-            repositoryManager.addRepository(repo);
-            LOG.info("REPOSITORY ++ {} ++ added.", repository);
-
-        }
+//            else if (key.startsWith(PREFIX_TYPE))
+//            {
+//                // load type definition
+//                String typeFile = replaceSystemProperties(parameters.get(key).trim());
+//                if (typeFile.length() == 0)
+//                {
+//                    continue;
+//                }
+//
+//                LOG.info("Loading type definition: {}", typeFile);
+//
+//                if (typeFile.charAt(0) == '/')
+//                {
+//                    try
+//                    {
+//                        ((InitializingTypeManager) typeManager).loadTypeDefinitionFromResource(typeFile);
+//                        continue;
+//                    }
+//                    catch (IllegalArgumentException e)
+//                    {
+//                        // resource not found -> try it as a regular file
+//                    }
+//                    catch (Exception e)
+//                    {
+//                        LOG.warn("Could not load type defintion from resource '{}': {}", typeFile, e.getMessage(), e);
+//                        continue;
+//                    }
+//                }
+//
+//                try
+//                {
+//                    ((InitializingTypeManager) typeManager).loadTypeDefinitionFromFile(typeFile);
+//                }
+//                catch (Exception e)
+//                {
+//                    LOG.warn("Could not load type defintion from file '{}': {}", typeFile, e.getMessage(), e);
+//                }
+//            }
+//            else if (key.startsWith(PREFIX_REPOSITORY) && getCharacterOccurenceCount(".", key) == 1)
+//            {
+//                repositories.add(key);
+//                LOG.info("Marking '{}' as repo", key);
+//            }
+//        }
+//
+//        for (String repository : repositories)
+//        {
+//            List<String> readWriteUsers = getUsersFromValue(parameters.get(repository + SUFFIX_READWRITE));
+//            List<String> readOnlyUsers = getUsersFromValue(parameters.get(repository + SUFFIX_READONLY));
+//            String indexPath = parameters.get(repository + SUFFIX_INDEX);
+//            String root = parameters.get(repository);
+//            String repoID = substringAfter(".", repository);
+//
+//            Repository repo = editorRepositoryFactory.repository(
+//                    repoID,
+//                    FileSystems.getDefault().getPath(root),
+//                    FileSystems.getDefault().getPath(indexPath),
+//                    readWriteUsers,
+//                    readOnlyUsers
+//            );
+//
+//            LOG.info("=======================================");
+//            LOG.info("Read write users are: {}", readWriteUsers);
+//            LOG.info("Read only users are: {}", readOnlyUsers);
+//            LOG.info("Index for this repo is located at: {}", indexPath);
+//            LOG.info("Repo is located at: {}", root);
+//            LOG.info("REPOSITORY ++ {} ++ INITIALIZED.", repoID);
+//
+//            repositoryManager.addRepository(repo);
+//            LOG.info("REPOSITORY ++ {} ++ added.", repository);
+//
+//        }
     }
 
-    private String substringAfter(String delimiter, String input)
+    private String getRepositoryId(String repositoryKey)
     {
-        return input.substring(input.indexOf(delimiter) + 1);
+        return repositoryKey.substring(repositoryKey.indexOf(".")+1);
     }
 
-    private int getCharacterOccurenceCount(String character, String input)
-    {
-        return input.length() - input.replace(character, "").length();
-    }
-
-    private List<String> getUsersFromValue(String value)
-    {
-        return split(value);
-    }
-
-    /**
-     * Splits a string by comma.
-     */
-    private List<String> split(String csl)
-    {
-        if (csl == null)
-        {
-            return Collections.emptyList();
-        }
-
-        List<String> result = new ArrayList<>();
-        for (String s : csl.split(","))
-        {
-            result.add(s.trim());
-        }
-
-        return result;
-    }
+//    private int getCharacterOccurenceCount(String character, String input)
+//    {
+//        return input.length() - input.replace(character, "").length();
+//    }
 
     /**
      * Finds all substrings in curly braces and replaces them with the value of

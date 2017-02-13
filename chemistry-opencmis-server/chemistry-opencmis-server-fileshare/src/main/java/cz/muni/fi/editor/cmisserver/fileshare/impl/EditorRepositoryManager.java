@@ -16,7 +16,7 @@ import java.util.Map;
  */
 public class EditorRepositoryManager implements RepositoryManager
 {
-    private Logger LOG = LoggerFactory.getLogger(EditorRepositoryManager.class);
+    private static final Logger LOG = LoggerFactory.getLogger(EditorRepositoryManager.class);
 
     private final Map<String, Repository> repositories = new HashMap<>();
 

@@ -5,6 +5,7 @@ import cz.muni.fi.editor.cmisserver.lucene.LuceneService;
 import cz.muni.fi.editor.cmisserver.query.QueryParser;
 import cz.muni.fi.editor.cmisserver.query.QueryParserFactory;
 import cz.muni.fi.editor.cmisserver.types.AdditionalTypemanager;
+import cz.muni.fi.editor.cmisserver.types.InitializingTypeManager;
 import org.antlr.runtime.RecognitionException;
 import org.apache.chemistry.opencmis.commons.BasicPermissions;
 import org.apache.chemistry.opencmis.commons.PropertyIds;
@@ -36,6 +37,7 @@ import javax.xml.stream.XMLStreamWriter;
 import java.io.*;
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
@@ -85,7 +87,17 @@ public class EditorRepository implements Repository
 
     private QueryParserFactory qps = new QueryParserFactory();
 
-    public EditorRepository(String repositoryId, Path root, TypeManager typeManager, LuceneService luceneService, List<String> readWriteUsers, List<String> readOnlyUsers)
+    private DirectoryStream.Filter<Path> filter = new DirectoryStream.Filter<Path>()
+    {
+        @Override
+        public boolean accept(Path entry) throws IOException
+        {
+            return entry.getFileName().toString().endsWith(".xml");
+        }
+    };
+
+
+    public EditorRepository(String repositoryId, Path root, LuceneService luceneService, TypeManager typeManager)
     {
         if (repositoryId == null || repositoryId.trim().length() == 0)
         {
@@ -94,44 +106,61 @@ public class EditorRepository implements Repository
 
         this.repositoryId = repositoryId;
 
-        if (root == null)
-        {
-            throw new IllegalArgumentException("Invalid root folder.");
-        }
-        if (!Files.exists(root))
-        {
-            throw new IllegalArgumentException("Given root folder does not exist");
-        }
-        if (!Files.isDirectory(root))
-        {
-            throw new IllegalArgumentException("Given root is not a directory.");
-        }
+        // no need to check root, it was checked by validation services
+        this.root = root.resolve("data");
 
-        this.root = root;
-        if (typeManager == null)
-        {
-            throw new IllegalStateException("Type manager is null. Call .setTypeManager first");
-        }
-        this.typeManager = typeManager;
         if (luceneService == null)
         {
             throw new IllegalStateException("Lucene service is not set. Call setLuceneService first.");
         }
         this.luceneService = luceneService;
 
-        for (String rw : readWriteUsers)
+        if (typeManager == null)
         {
-            this.readWriteUserMap.put(rw, false);
+            throw new IllegalStateException("Type manager is null. Call .setTypeManager first");
         }
-        for (String ro : readOnlyUsers)
+        this.typeManager = typeManager;
+
+        Path configurationDirectory = root.resolve("conf");
+
+        try (DirectoryStream<Path> ds = Files.newDirectoryStream(configurationDirectory, filter))
         {
-            this.readWriteUserMap.put(ro, true);
+            for (Path xmltype : ds)
+            {
+                ((InitializingTypeManager) typeManager).loadFromPath(xmltype);
+                LOG.info(String.format("XML type from path '%s' added.", xmltype));
+            }
+        }
+        catch (IOException | XMLStreamException ex)
+        {
+            throw new CmisRuntimeException(ex.getMessage(), BigInteger.ZERO, ex);
         }
 
-        repositoryInfo10 = createRepositoryInfo(CmisVersion.CMIS_1_0);
-        repositoryInfo11 = createRepositoryInfo(CmisVersion.CMIS_1_1);
+        java.util.Properties properties = new java.util.Properties();
+        try
+        {
+            properties.load(Files.newInputStream(configurationDirectory.resolve("configuration.properties")));
+        }
+        catch (IOException e)
+        {
+            throw new CmisRuntimeException(e.getMessage(), BigInteger.ZERO, e);
+        }
 
-        this.luceneService = luceneService;
+        String readWriterUsers = properties.getProperty("readwrite");
+        String readOnlyUsers = properties.getProperty("readonly");
+        String description = properties.getProperty("description");
+        String name = properties.getProperty("name");
+
+        repositoryInfo10 = createRepositoryInfo(CmisVersion.CMIS_1_0, name, description);
+        repositoryInfo11 = createRepositoryInfo(CmisVersion.CMIS_1_1, name, description);
+
+        for(String user : getUsersFromValue(readOnlyUsers)){
+            this.readWriteUserMap.put(user,true);
+        }
+
+        for(String user : getUsersFromValue(readWriterUsers)){
+            this.readWriteUserMap.put(user,false);
+        }
     }
 
     /**
@@ -1550,6 +1579,12 @@ public class EditorRepository implements Repository
         return oli;
     }
 
+    @Override
+    public TypeDefinition createType(String repositoryId, TypeDefinition type)
+    {
+        return null;
+    }
+
     // --- helpers ---
 
     /**
@@ -2435,15 +2470,15 @@ public class EditorRepository implements Repository
         }
     }
 
-    private RepositoryInfo createRepositoryInfo(CmisVersion cmisVersion)
+    private RepositoryInfo createRepositoryInfo(CmisVersion cmisVersion, String name, String description)
     {
         assert cmisVersion != null;
 
         RepositoryInfoImpl repositoryInfo = new RepositoryInfoImpl();
 
         repositoryInfo.setId(repositoryId);
-        repositoryInfo.setName(repositoryId);
-        repositoryInfo.setDescription(repositoryId);
+        repositoryInfo.setName(name);
+        repositoryInfo.setDescription(description);
 
         repositoryInfo.setCmisVersionSupported(cmisVersion.value());
 
@@ -2558,5 +2593,29 @@ public class EditorRepository implements Repository
         pm.setPermissions(Collections.singletonList(permission));
 
         return pm;
+    }
+
+    private List<String> getUsersFromValue(String value)
+    {
+        return split(value);
+    }
+
+    /**
+     * Splits a string by comma.
+     */
+    private List<String> split(String csl)
+    {
+        if (csl == null)
+        {
+            return Collections.emptyList();
+        }
+
+        List<String> result = new ArrayList<>();
+        for (String s : csl.split(","))
+        {
+            result.add(s.trim());
+        }
+
+        return result;
     }
 }

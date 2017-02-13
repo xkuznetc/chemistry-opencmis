@@ -19,6 +19,8 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigInteger;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.*;
 
 /**
@@ -33,7 +35,8 @@ public class EditorTypeManager implements TypeManager, AdditionalTypemanager, In
 
     private TypeDefinitionFactory typeDefinitionFactory;
 
-    public EditorTypeManager(){
+    public EditorTypeManager()
+    {
         typeDefinitionFactory = TypeDefinitionFactory.newInstance();
         typeDefinitionFactory.setDefaultNamespace(NAMESPACE);
         typeDefinitionFactory.setDefaultControllableAcl(false);
@@ -45,10 +48,10 @@ public class EditorTypeManager implements TypeManager, AdditionalTypemanager, In
         TypeDefinitionContainer document = createDocumentTypeDefinition(CmisVersion.CMIS_1_1);
 
         // add folder and document as base types for hierarchy
-        tdcMap.put(folder.getTypeDefinition().getId(),folder);
-        tdcMap.put(document.getTypeDefinition().getId(),document);
-        tdMap.put(folder.getTypeDefinition().getId(),folder.getTypeDefinition());
-        tdMap.put(document.getTypeDefinition().getId(),document.getTypeDefinition());
+        tdcMap.put(folder.getTypeDefinition().getId(), folder);
+        tdcMap.put(document.getTypeDefinition().getId(), document);
+        tdMap.put(folder.getTypeDefinition().getId(), folder.getTypeDefinition());
+        tdMap.put(document.getTypeDefinition().getId(), document.getTypeDefinition());
     }
 
     @Override
@@ -78,16 +81,22 @@ public class EditorTypeManager implements TypeManager, AdditionalTypemanager, In
     }
 
     @Override
-    public void loadTypeDefinitionFromFile(String filename) throws IOException, XMLStreamException
+    public TypeDefinition createType(String repositoryId, TypeDefinition type)
     {
-        loadTypeDefinitionFromStream(new BufferedInputStream(new FileInputStream(filename), 64 * 1024));
+        return null;
     }
 
-    @Override
-    public void loadTypeDefinitionFromResource(String name) throws IOException, XMLStreamException
-    {
-        loadTypeDefinitionFromStream(this.getClass().getResourceAsStream(name));
-    }
+//    @Override
+//    public void loadTypeDefinitionFromFile(String filename) throws IOException, XMLStreamException
+//    {
+//        loadTypeDefinitionFromStream(new BufferedInputStream(new FileInputStream(filename), 64 * 1024));
+//    }
+//
+//    @Override
+//    public void loadTypeDefinitionFromResource(String name) throws IOException, XMLStreamException
+//    {
+//        loadTypeDefinitionFromStream(this.getClass().getResourceAsStream(name));
+//    }
 
     @Override
     public Collection<TypeDefinition> getInternalTypeDefinitions()
@@ -193,6 +202,12 @@ public class EditorTypeManager implements TypeManager, AdditionalTypemanager, In
     public void deleteTypeDefinition(String typeId)
     {
         throw new UnsupportedOperationException("Operation not supported");
+    }
+
+    @Override
+    public void loadFromPath(Path path) throws IOException, XMLStreamException
+    {
+        loadTypeDefinitionFromStream(Files.newInputStream(path));
     }
 
     private boolean isRootType(TypeDefinitionContainer typeDefinitionContainer)

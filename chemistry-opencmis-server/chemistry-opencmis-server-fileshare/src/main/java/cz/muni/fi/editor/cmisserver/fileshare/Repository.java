@@ -88,4 +88,6 @@ public interface Repository
                                boolean includeAllowableActions, boolean includeACL, ObjectInfoHandler objectInfos);
 
     ObjectList query(String repositoryId, String statement, Boolean searchAllVersions, Boolean includeAllowableActions, IncludeRelationships includeRelationships, String renditionFilter, BigInteger maxItems, BigInteger skipCount, ExtensionsData extension);
+
+    TypeDefinition createType(String repositoryId, TypeDefinition type);
 }
