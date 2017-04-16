@@ -59,14 +59,18 @@ public class EvalQueryTest extends AbstractServiceTest {
     @Override
     @Before
     public void setUp() {
+    	setUp(false);
+    }
+
+    protected void setUp(boolean parserMode) {
         // initialize query object with type manager
         super.setTypeCreatorClass(UnitTestTypeSystemCreator.class.getName());
-        super.setUp();
+        super.setUp(parserMode);
         // create test data
         dataCreator = new QueryTestDataCreator(fRepositoryId, fRootFolderId, fObjSvc, fVerSvc);
         dataCreator.createBasicTestData();
     }
-
+    
     @Override
     @After
     public void tearDown() {
@@ -1073,7 +1077,7 @@ public class EvalQueryTest extends AbstractServiceTest {
         log.debug("Start testSecondaryJoin...");
         // create documents with secondary types in addition
         dataCreator.createSecondaryTestDocuments();
-        String statement = "SELECT * FROM " + COMPLEX_TYPE + " LEFT JOIN " + SECONDARY_TYPE + " ON " + COMPLEX_TYPE
+        String statement = "SELECT * FROM " + COMPLEX_TYPE + " JOIN " + SECONDARY_TYPE + " ON " + COMPLEX_TYPE
                 + ".cmis:objectId = " + SECONDARY_TYPE + ".cmis:objectId WHERE cmis:name LIKE 'docwithsecondary%'";
         ObjectList res = doQuery(statement);
         assertEquals(2, res.getObjects().size());
@@ -1086,7 +1090,7 @@ public class EvalQueryTest extends AbstractServiceTest {
 
         // Test a query with secondary types matching only one document not
         // having this secondary type
-        statement = "SELECT * FROM " + COMPLEX_TYPE + " LEFT JOIN " + SECONDARY_TYPE + " ON " + COMPLEX_TYPE
+        statement = "SELECT * FROM " + COMPLEX_TYPE + " JOIN " + SECONDARY_TYPE + " ON " + COMPLEX_TYPE
                 + ".cmis:objectId = " + SECONDARY_TYPE + ".cmis:objectId WHERE cmis:name = 'alpha'";
         res = doQuery(statement);
         assertEquals(1, res.getObjects().size());
@@ -1099,7 +1103,24 @@ public class EvalQueryTest extends AbstractServiceTest {
 
         log.debug("...Stop testSecondaryJoin.");
     }
-
+    
+    @Test
+    public void testAskForSecondaryPropertyOnSimpleQuery() {
+        log.debug("Start testAskForSecondaryPropertyOnSimpleQuery...");
+        setUp(true); // force relaxed parser mode
+        dataCreator.createSecondaryTestDocuments();
+        String statement = "SELECT cmis:name, cmis:objectId, " + UnitTestTypeSystemCreator.SECONDARY_INTEGER_PROP
+        		+ " AS SecInt, " + UnitTestTypeSystemCreator.SECONDARY_STRING_PROP + " FROM " + COMPLEX_TYPE + 
+        		" WHERE cmis:name LIKE 'docwithsecondary%'";
+        ObjectList res = doQuery(statement);
+        assertEquals(2, res.getObjects().size());
+        assertTrue(resultContainsProperty(PropertyIds.NAME, res));
+        assertTrue(resultContainsProperty(PropertyIds.OBJECT_ID, res));
+        assertTrue(resultContainsProperty(UnitTestTypeSystemCreator.SECONDARY_STRING_PROP, res));
+        assertTrue(resultContainsQueryName("SecInt", res));
+        log.debug("...Stop testAskForSecondaryPropertyOnSimpleQuery.");
+    }
+    
     @Test
     public void testMultipleContains() {
         log.debug("Start testMultipleContains...");
@@ -1200,6 +1221,17 @@ public class EvalQueryTest extends AbstractServiceTest {
             }
         }
         return true;
+    }
+    
+    private static boolean resultContainsQueryName(String queryName, ObjectList results) {
+        for (ObjectData od : results.getObjects()) {
+        	for (PropertyData<?> propData : od.getProperties().getProperties().values()) {
+        		if (queryName.equals(propData.getQueryName())) {
+        			return true;
+        		}
+        	}
+        }
+        return false;
     }
 
 }

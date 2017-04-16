@@ -18,15 +18,11 @@
  */
 package org.apache.chemistry.opencmis.workbench;
 
-import groovy.lang.Binding;
-import groovy.ui.Console;
-import groovy.util.GroovyScriptEngine;
-
 import java.awt.Color;
 import java.awt.Component;
-import java.awt.Cursor;
 import java.awt.Desktop;
-import java.awt.Desktop.Action;
+import java.awt.Dialog;
+import java.awt.Frame;
 import java.awt.Image;
 import java.awt.Toolkit;
 import java.awt.Window;
@@ -34,17 +30,13 @@ import java.awt.datatransfer.Clipboard;
 import java.awt.datatransfer.StringSelection;
 import java.awt.datatransfer.Transferable;
 import java.awt.event.ActionEvent;
-import java.awt.event.ActionListener;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.io.OutputStream;
-import java.io.PrintWriter;
-import java.io.Writer;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
@@ -58,33 +50,26 @@ import java.util.List;
 import java.util.Properties;
 
 import javax.imageio.ImageIO;
-import javax.script.ScriptEngine;
-import javax.script.ScriptEngineManager;
 import javax.swing.AbstractAction;
 import javax.swing.Icon;
 import javax.swing.ImageIcon;
 import javax.swing.InputMap;
 import javax.swing.JComponent;
-import javax.swing.JFrame;
-import javax.swing.JMenu;
-import javax.swing.JMenuItem;
 import javax.swing.JRootPane;
 import javax.swing.JTable;
 import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
-import javax.swing.text.AttributeSet;
 import javax.swing.text.DefaultEditorKit;
+import javax.swing.undo.CannotUndoException;
+import javax.swing.undo.UndoManager;
 
 import org.apache.chemistry.opencmis.client.api.CmisObject;
 import org.apache.chemistry.opencmis.client.api.ObjectId;
-import org.apache.chemistry.opencmis.client.api.Session;
-import org.apache.chemistry.opencmis.commons.SessionParameter;
 import org.apache.chemistry.opencmis.commons.data.ContentStream;
 import org.apache.chemistry.opencmis.commons.exceptions.CmisBaseException;
 import org.apache.chemistry.opencmis.commons.exceptions.CmisRuntimeException;
 import org.apache.chemistry.opencmis.commons.impl.IOUtils;
-import org.apache.chemistry.opencmis.workbench.model.ClientModel;
 import org.apache.chemistry.opencmis.workbench.swing.WorkbenchFileChooser;
 import org.apache.chemistry.opencmis.workbench.worker.OpenContentWorker;
 import org.apache.chemistry.opencmis.workbench.worker.StoreWorker;
@@ -101,6 +86,9 @@ public final class ClientHelper {
     public static final int BUTTON_ICON_SIZE = 11;
     public static final int OBJECT_ICON_SIZE = 16;
     public static final int ICON_BUTTON_ICON_SIZE = 16;
+
+    public static final String UNDO_ACTION_KEY = "Undo";
+    public static final String REDO_ACTION_KEY = "Redo";
 
     private static final Logger LOG = LoggerFactory.getLogger(ClientHelper.class);
 
@@ -148,9 +136,18 @@ public final class ClientHelper {
     public static void showError(Component parent, Throwable t) {
         logError(t);
 
-        JFrame frame = (parent == null ? null : (JFrame) SwingUtilities.getRoot(parent));
-
-        new ExceptionDialog(frame, t);
+        if (parent == null) {
+            new ExceptionDialog((Frame) null, t);
+        } else {
+            Window window = (Window) SwingUtilities.getRoot(parent);
+            if (window instanceof Frame) {
+                new ExceptionDialog((Frame) window, t);
+            } else if (window instanceof Dialog) {
+                new ExceptionDialog((Dialog) window, t);
+            } else {
+                new ExceptionDialog((Frame) null, t);
+            }
+        }
     }
 
     public static boolean isMacOSX() {
@@ -210,6 +207,52 @@ public final class ClientHelper {
                 }
             }
         });
+    }
+
+    public static AbstractAction createAndAttachUndoAction(final UndoManager undoManager, JComponent component) {
+        AbstractAction undoAction = new AbstractAction(UNDO_ACTION_KEY) {
+            private static final long serialVersionUID = 1L;
+
+            public void actionPerformed(ActionEvent evt) {
+                try {
+                    if (undoManager.canUndo()) {
+                        undoManager.undo();
+                    }
+                } catch (CannotUndoException e) {
+                }
+            }
+        };
+
+        component.getActionMap().put(UNDO_ACTION_KEY, undoAction);
+
+        KeyStroke undoKey = isMacOSX() ? KeyStroke.getKeyStroke("meta pressed Z")
+                : KeyStroke.getKeyStroke("control pressed Z");
+        component.getInputMap().put(undoKey, UNDO_ACTION_KEY);
+
+        return undoAction;
+    }
+
+    public static AbstractAction createAndAttachRedoAction(final UndoManager undoManager, JComponent component) {
+        AbstractAction redoAction = new AbstractAction(REDO_ACTION_KEY) {
+            private static final long serialVersionUID = 1L;
+
+            public void actionPerformed(ActionEvent evt) {
+                try {
+                    if (undoManager.canRedo()) {
+                        undoManager.redo();
+                    }
+                } catch (CannotUndoException e) {
+                }
+            }
+        };
+
+        component.getActionMap().put(REDO_ACTION_KEY, redoAction);
+
+        KeyStroke redoKey = isMacOSX() ? KeyStroke.getKeyStroke("meta shift pressed Z")
+                : KeyStroke.getKeyStroke("control shift pressed Z");
+        component.getInputMap().put(redoKey, REDO_ACTION_KEY);
+
+        return redoAction;
     }
 
     public static ImageIcon getIcon(String name) {
@@ -290,7 +333,8 @@ public final class ClientHelper {
                 fileChooser.setSelectedFile(new File(file.getName()));
 
                 int chooseResult = fileChooser.showDialog(getComponent(), "Download");
-                if (chooseResult == WorkbenchFileChooser.APPROVE_OPTION && !file.equals(fileChooser.getSelectedFile())) {
+                if (chooseResult == WorkbenchFileChooser.APPROVE_OPTION
+                        && !file.equals(fileChooser.getSelectedFile())) {
                     try {
                         InputStream in = null;
                         OutputStream out = null;
@@ -558,148 +602,6 @@ public final class ClientHelper {
             return null;
         } finally {
             IOUtils.closeQuietly(stream);
-        }
-    }
-
-    public static Console openConsole(final Component parent, final ClientModel model, final URI file) {
-        return openConsole(parent, model, file, null);
-    }
-
-    public static Console openConsole(final Component parent, final ClientModel model, final String soureCode) {
-        return openConsole(parent, model, null, soureCode);
-    }
-
-    public static Console openConsole(final Component parent, final ClientModel model, final URI file,
-            final String soureCode) {
-        try {
-            parent.setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
-
-            final Session groovySession = model.getClientSession().getSession();
-            final String user = model.getClientSession().getSessionParameters().get(SessionParameter.USER);
-            final String title = "GroovyConsole - Repsository: " + groovySession.getRepositoryInfo().getId();
-
-            final Console console = new Console(parent.getClass().getClassLoader()) {
-                @Override
-                public void updateTitle() {
-                    JFrame frame = (JFrame) getFrame();
-
-                    if (getScriptFile() != null) {
-                        frame.setTitle(((File) getScriptFile()).getName() + (getDirty() ? " * " : "") + " - " + title);
-                    } else {
-                        frame.setTitle(title);
-                    }
-                }
-            };
-
-            console.setVariable("session", groovySession);
-            console.setVariable("binding", groovySession.getBinding());
-
-            console.run();
-
-            JMenu cmisMenu = new JMenu("CMIS");
-            console.getFrame().getRootPane().getJMenuBar().add(cmisMenu);
-
-            addConsoleMenu(cmisMenu, "CMIS 1.0 Specification", new URI(
-                    "https://docs.oasis-open.org/cmis/CMIS/v1.0/os/cmis-spec-v1.0.html"));
-            addConsoleMenu(cmisMenu, "CMIS 1.1 Specification", new URI(
-                    "https://docs.oasis-open.org/cmis/CMIS/v1.1/CMIS-v1.1.html"));
-            addConsoleMenu(cmisMenu, "OpenCMIS Documentation", new URI(
-                    "https://chemistry.apache.org/java/opencmis.html"));
-            addConsoleMenu(cmisMenu, "OpenCMIS Code Samples",
-                    new URI("https://chemistry.apache.org/docs/cmis-samples/"));
-            addConsoleMenu(cmisMenu, "OpenCMIS Client API JavaDoc", new URI(
-                    "https://chemistry.apache.org/java/javadoc/"));
-            cmisMenu.addSeparator();
-            JMenuItem menuItem = new JMenuItem("CMIS Session Details");
-            menuItem.addActionListener(new ActionListener() {
-                @Override
-                public void actionPerformed(ActionEvent e) {
-                    AttributeSet style = console.getOutputStyle();
-                    console.clearOutput();
-                    console.appendOutputNl("Session ID:      " + groovySession.getBinding().getSessionId(), style);
-                    console.appendOutputNl("Repository ID:   " + groovySession.getRepositoryInfo().getId(), style);
-                    console.appendOutputNl("Repository name: " + groovySession.getRepositoryInfo().getName(), style);
-                    console.appendOutputNl("Binding:         " + groovySession.getBinding().getBindingType(), style);
-                    console.appendOutputNl("User:            " + user, style);
-                }
-            });
-            cmisMenu.add(menuItem);
-
-            if (file != null) {
-                console.getInputArea().setText(readFileAndRemoveHeader(file));
-            } else if (soureCode != null) {
-                console.getInputArea().setText(soureCode);
-            }
-
-            return console;
-        } catch (Exception ex) {
-            showError(null, ex);
-            return null;
-        } finally {
-            parent.setCursor(Cursor.getPredefinedCursor(Cursor.DEFAULT_CURSOR));
-        }
-    }
-
-    private static void addConsoleMenu(JMenu menu, String title, final URI url) {
-        if (!Desktop.isDesktopSupported() || !Desktop.getDesktop().isSupported(Action.BROWSE)) {
-            return;
-        }
-
-        JMenuItem menuItem = new JMenuItem(title);
-        menuItem.addActionListener(new ActionListener() {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-                try {
-                    Desktop.getDesktop().browse(url);
-                } catch (IOException ex) {
-                    showError(null, ex);
-                }
-            }
-        });
-
-        menu.add(menuItem);
-    }
-
-    public static void runGroovyScript(final Component parent, final ClientModel model, final File file,
-            final Writer out) {
-        try {
-            parent.setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
-
-            String[] roots = new String[] { file.getParentFile().getAbsolutePath() };
-            GroovyScriptEngine gse = new GroovyScriptEngine(roots, parent.getClass().getClassLoader());
-            Binding binding = new Binding();
-            binding.setVariable("session", model.getClientSession().getSession());
-            binding.setVariable("binding", model.getClientSession().getSession().getBinding());
-            binding.setVariable("out", out);
-            gse.run(file.getName(), binding);
-        } catch (Exception ex) {
-            ClientHelper.showError(null, ex);
-        } finally {
-            parent.setCursor(Cursor.getPredefinedCursor(Cursor.DEFAULT_CURSOR));
-        }
-    }
-
-    public static void runJSR223Script(final Component parent, final ClientModel model, final File file,
-            final String ext, final Writer out) {
-        InputStreamReader reader = null;
-        try {
-            parent.setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
-
-            reader = new InputStreamReader(new FileInputStream(file), IOUtils.UTF8);
-
-            ScriptEngineManager mgr = new ScriptEngineManager();
-            ScriptEngine engine = mgr.getEngineByExtension(ext);
-            engine.getContext().setWriter(out);
-            engine.getContext().setErrorWriter(out);
-            engine.put("session", model.getClientSession().getSession());
-            engine.put("binding", model.getClientSession().getSession().getBinding());
-            engine.put("out", new PrintWriter(out));
-            engine.eval(reader);
-        } catch (Exception ex) {
-            ClientHelper.showError(null, ex);
-        } finally {
-            IOUtils.closeQuietly(reader);
-            parent.setCursor(Cursor.getPredefinedCursor(Cursor.DEFAULT_CURSOR));
         }
     }
 
