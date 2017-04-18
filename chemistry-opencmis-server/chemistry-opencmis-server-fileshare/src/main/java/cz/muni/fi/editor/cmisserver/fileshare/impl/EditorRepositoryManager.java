@@ -5,6 +5,7 @@ import cz.muni.fi.editor.cmisserver.fileshare.RepositoryManager;
 import org.apache.chemistry.opencmis.commons.exceptions.CmisObjectNotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 
 import java.util.Collection;
 import java.util.HashMap;
@@ -14,6 +15,7 @@ import java.util.Map;
  * Code taken from default implementation
  * Created by emptak on 2/6/17.
  */
+@Component
 public class EditorRepositoryManager implements RepositoryManager
 {
     private static final Logger LOG = LoggerFactory.getLogger(EditorRepositoryManager.class);

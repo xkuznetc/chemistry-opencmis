@@ -23,10 +23,7 @@ import java.io.IOException;
 import java.math.BigInteger;
 import java.nio.file.FileSystems;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 /**
  * Created by emptak on 2/6/17.
@@ -71,11 +68,10 @@ public class EditorCmisServiceFactory extends AbstractServiceFactory
     private CmisServiceWrapperManager wrapperManager;
 
     private ApplicationContext ctx;
-    private UserManager userManager;
-    private TypeManager typeManager;
     private RepositoryManager repositoryManager;
-    private RepositoryValidationService repositoryValidationService;
+    private UserManager userManager;
     private EditorRepositoryFactory editorRepositoryFactory;
+
 
     public RepositoryManager getRepositoryManager()
     {
@@ -87,28 +83,28 @@ public class EditorCmisServiceFactory extends AbstractServiceFactory
         return userManager;
     }
 
-    // used in jsp
+    // used in jsp TODO multiple type managers ?
     public JSPTypeManager getTypeManager()
     {
-        return (JSPTypeManager) typeManager;
+        return ctx.getBean(JSPTypeManager.class);
     }
 
     @Override
     public void init(Map<String, String> parameters)
     {
+        ctx = new AnnotationConfigApplicationContext(CmisConfiguration.class);
+
+        LOG.info("Spring running with id {}", ctx.getId());
+        repositoryManager = ctx.getBean(RepositoryManager.class);
+        editorRepositoryFactory = ctx.getBean(EditorRepositoryFactory.class);
+        userManager = ctx.getBean(UserManager.class);
+
         wrapperManager = new CmisServiceWrapperManager();
         wrapperManager.addWrappersFromServiceFactoryParameters(parameters);
         wrapperManager.addOuterWrapper(ConformanceCmisServiceWrapper.class, DEFAULT_MAX_ITEMS_TYPES,
                 DEFAULT_DEPTH_TYPES, DEFAULT_MAX_ITEMS_OBJECTS, DEFAULT_DEPTH_OBJECTS);
 
 
-        ctx = new AnnotationConfigApplicationContext(CmisConfiguration.class);
-        LOG.info("Spring running with id {}", ctx.getId());
-        userManager = ctx.getBean(UserManager.class);
-        typeManager = ctx.getBean(TypeManager.class);
-        repositoryManager = ctx.getBean(RepositoryManager.class);
-        editorRepositoryFactory = ctx.getBean(EditorRepositoryFactory.class);
-        repositoryValidationService = ctx.getBean(RepositoryValidationService.class);
 
         readConfiguration(parameters);
     }
@@ -122,7 +118,7 @@ public class EditorCmisServiceFactory extends AbstractServiceFactory
     @Override
     public CmisService getService(CallContext context)
     {
-        userManager.authenticate(context);
+        getUserManager().authenticate(context);
         CallContextAwareCmisService service = threadLocalService.get();
         if (service == null)
         {
@@ -141,6 +137,7 @@ public class EditorCmisServiceFactory extends AbstractServiceFactory
         List<String> keys = new ArrayList<>(parameters.keySet());
         Collections.sort(keys);
 
+        //Map<String,String> users = new HashMap<>();
         for (String key : keys)
         {
             if (key.startsWith(PREFIX_LOGIN))
@@ -164,19 +161,19 @@ public class EditorCmisServiceFactory extends AbstractServiceFactory
 
                 LOG.info("Adding login '{}'.", username);
 
-                userManager.addLogin(username, password);
+                getUserManager().addLogin(username, password);
             }
             else if (key.startsWith(PREFIX_REPOSITORY))
             {
                 Path repositoryPath = FileSystems.getDefault().getPath(parameters.get(key));
-                try
+             /*   try
                 {
                     repositoryValidationService.load(repositoryPath);
                 }
                 catch (IOException ex)
                 {
                     throw new CmisRuntimeException(ex.getMessage(), BigInteger.ZERO, ex);
-                }
+                }*/
 
                 repositoryManager.addRepository(editorRepositoryFactory.repository(
                         getRepositoryId(key),

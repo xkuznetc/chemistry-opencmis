@@ -9,5 +9,5 @@ import java.nio.file.Path;
  */
 public interface InitializingTypeManager
 {
-    void loadFromPath(Path path) throws IOException, XMLStreamException;
+
 }

@@ -17,6 +17,9 @@ import org.apache.chemistry.opencmis.commons.spi.Holder;
 import org.apache.chemistry.opencmis.server.support.wrapper.CallContextAwareCmisService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.config.ConfigurableBeanFactory;
+import org.springframework.context.annotation.Scope;
+import org.springframework.stereotype.Component;
 
 import java.math.BigInteger;
 import java.util.ArrayList;
@@ -26,6 +29,8 @@ import java.util.List;
 /**
  * Created by emptak on 2/6/17.
  */
+@Component
+@Scope(ConfigurableBeanFactory.SCOPE_PROTOTYPE)
 public class EditorCmisService extends AbstractCmisService implements CallContextAwareCmisService
 {
     private static final Logger LOG = LoggerFactory.getLogger(EditorCmisService.class);

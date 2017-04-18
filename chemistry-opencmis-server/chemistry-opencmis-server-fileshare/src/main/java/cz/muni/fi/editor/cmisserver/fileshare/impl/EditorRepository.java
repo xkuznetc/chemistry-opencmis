@@ -1,11 +1,12 @@
 package cz.muni.fi.editor.cmisserver.fileshare.impl;
 
 import cz.muni.fi.editor.cmisserver.fileshare.Repository;
+import cz.muni.fi.editor.cmisserver.fileshare.RepositoryConfiguration;
+import cz.muni.fi.editor.cmisserver.fileshare.UserManager;
 import cz.muni.fi.editor.cmisserver.lucene.LuceneService;
 import cz.muni.fi.editor.cmisserver.query.QueryParser;
 import cz.muni.fi.editor.cmisserver.query.QueryParserFactory;
-import cz.muni.fi.editor.cmisserver.types.AdditionalTypemanager;
-import cz.muni.fi.editor.cmisserver.types.InitializingTypeManager;
+import cz.muni.fi.editor.cmisserver.types.EditorTypeManager;
 import org.antlr.runtime.RecognitionException;
 import org.apache.chemistry.opencmis.commons.BasicPermissions;
 import org.apache.chemistry.opencmis.commons.PropertyIds;
@@ -23,13 +24,15 @@ import org.apache.chemistry.opencmis.commons.spi.Holder;
 import org.apache.chemistry.opencmis.fileshare.ContentRangeInputStream;
 import org.apache.chemistry.opencmis.fileshare.FileShareUtils;
 import org.apache.chemistry.opencmis.server.impl.ServerVersion;
-import org.apache.chemistry.opencmis.server.support.TypeManager;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.StringField;
 import org.apache.lucene.document.TextField;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.config.ConfigurableBeanFactory;
+import org.springframework.context.annotation.Scope;
+import org.springframework.stereotype.Component;
 
 import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
@@ -45,6 +48,8 @@ import java.util.*;
 /**
  * Created by emptak on 2/6/17.
  */
+@Component
+@Scope(ConfigurableBeanFactory.SCOPE_PROTOTYPE)
 public class EditorRepository implements Repository
 {
     private static final Logger LOG = LoggerFactory.getLogger(EditorRepository.class);
@@ -52,38 +57,20 @@ public class EditorRepository implements Repository
     private static final String ROOT_ID = "@root@";
     private static final String SHADOW_EXT = ".cmis.xml";
     private static final String SHADOW_FOLDER = "cmis.xml";
-
     private static final String USER_UNKNOWN = "<unknown>";
-
     private static final int BUFFER_SIZE = 64 * 1024;
 
-    /**
-     * Repository id.
-     */
+
     private String repositoryId;
-    /**
-     * Root directory.
-     */
-    private Path root;
-    /**
-     * Types.
-     */
-    private TypeManager typeManager;
-    /**
-     * Users.
-     */
-    private Map<String, Boolean> readWriteUserMap = new HashMap<>();
-
-    /**
-     * CMIS 1.0 repository info.
-     */
     private RepositoryInfo repositoryInfo10;
-    /**
-     * CMIS 1.1 repository info.
-     */
     private RepositoryInfo repositoryInfo11;
+    private Map<String,Boolean> readWriteUserMap = new HashMap<>();
 
+    private EditorTypeManager typeManager;
+    private UserManager userManager;
+    private RepositoryConfiguration repositoryConfiguration;
     private LuceneService luceneService;
+    private boolean initialized = false;
 
     private QueryParserFactory qps = new QueryParserFactory();
 
@@ -96,70 +83,68 @@ public class EditorRepository implements Repository
         }
     };
 
+    public EditorRepository(){
 
-    public EditorRepository(String repositoryId, Path root, LuceneService luceneService, TypeManager typeManager)
+    }
+
+    public void setRepositoryId(String repositoryId)
     {
-        if (repositoryId == null || repositoryId.trim().length() == 0)
-        {
-            throw new IllegalArgumentException("Invalid repository id!");
-        }
-
         this.repositoryId = repositoryId;
+    }
 
-        // no need to check root, it was checked by validation services
-        this.root = root.resolve("data");
-
-        if (luceneService == null)
-        {
-            throw new IllegalStateException("Lucene service is not set. Call setLuceneService first.");
-        }
-        this.luceneService = luceneService;
-
-        if (typeManager == null)
-        {
-            throw new IllegalStateException("Type manager is null. Call .setTypeManager first");
-        }
+    public void setTypeManager(EditorTypeManager typeManager)
+    {
         this.typeManager = typeManager;
+    }
 
-        Path configurationDirectory = root.resolve("conf");
+    public void setUserManager(UserManager userManager)
+    {
+        this.userManager = userManager;
+    }
 
-        try (DirectoryStream<Path> ds = Files.newDirectoryStream(configurationDirectory, filter))
-        {
-            for (Path xmltype : ds)
+    public void setRepositoryConfiguration(RepositoryConfiguration repositoryConfiguration)
+    {
+        this.repositoryConfiguration = repositoryConfiguration;
+    }
+
+    public void setLuceneService(LuceneService luceneService)
+    {
+        this.luceneService = luceneService;
+    }
+
+    public void initializeRepository()
+    {
+        if(!initialized){
+            java.util.Properties properties = new java.util.Properties();
+            try
             {
-                ((InitializingTypeManager) typeManager).loadFromPath(xmltype);
-                LOG.info(String.format("XML type from path '%s' added.", xmltype));
+                properties.load(Files.newInputStream(repositoryConfiguration.getConfigurationPath().resolve("configuration.properties")));
             }
-        }
-        catch (IOException | XMLStreamException ex)
-        {
-            throw new CmisRuntimeException(ex.getMessage(), BigInteger.ZERO, ex);
-        }
+            catch (IOException e)
+            {
+                throw new CmisRuntimeException(e.getMessage(), BigInteger.ZERO, e);
+            }
 
-        java.util.Properties properties = new java.util.Properties();
-        try
-        {
-            properties.load(Files.newInputStream(configurationDirectory.resolve("configuration.properties")));
+            String readWriterUsers = properties.getProperty("readwrite");
+            String readOnlyUsers = properties.getProperty("readonly");
+            String description = properties.getProperty("description");
+            String name = properties.getProperty("name");
+
+            repositoryInfo10 = createRepositoryInfo(CmisVersion.CMIS_1_0, name, description);
+            repositoryInfo11 = createRepositoryInfo(CmisVersion.CMIS_1_1, name, description);
+
+            for(String user : getUsersFromValue(readOnlyUsers)){
+                this.readWriteUserMap.put(user,true);
+            }
+
+            for(String user : getUsersFromValue(readWriterUsers)){
+                this.readWriteUserMap.put(user,false);
+            }
+
+            initialized = true;
         }
-        catch (IOException e)
-        {
-            throw new CmisRuntimeException(e.getMessage(), BigInteger.ZERO, e);
-        }
-
-        String readWriterUsers = properties.getProperty("readwrite");
-        String readOnlyUsers = properties.getProperty("readonly");
-        String description = properties.getProperty("description");
-        String name = properties.getProperty("name");
-
-        repositoryInfo10 = createRepositoryInfo(CmisVersion.CMIS_1_0, name, description);
-        repositoryInfo11 = createRepositoryInfo(CmisVersion.CMIS_1_1, name, description);
-
-        for(String user : getUsersFromValue(readOnlyUsers)){
-            this.readWriteUserMap.put(user,true);
-        }
-
-        for(String user : getUsersFromValue(readWriterUsers)){
-            this.readWriteUserMap.put(user,false);
+        else{
+            LOG.error("Repository is already initialized - skipping.");
         }
     }
 
@@ -178,7 +163,7 @@ public class EditorRepository implements Repository
     @Override
     public File getRootDirectory()
     {
-        return root.toFile();
+        return repositoryConfiguration.getRootPath().toFile();
     }
 
     /**
@@ -211,7 +196,7 @@ public class EditorRepository implements Repository
         debug("getTypesChildren");
         checkUser(context, false);
 
-        return ((AdditionalTypemanager) typeManager).getTypeChildren(context, typeId, includePropertyDefinitions, maxItems, skipCount);
+        return typeManager.getTypeChildren(context, typeId, includePropertyDefinitions, maxItems, skipCount);
     }
 
     /**
@@ -224,7 +209,7 @@ public class EditorRepository implements Repository
         debug("getTypesDescendants");
         checkUser(context, false);
 
-        return ((AdditionalTypemanager) typeManager).getTypeDescendants(context, typeId, depth, includePropertyDefinitions);
+        return typeManager.getTypeDescendants(context, typeId, depth, includePropertyDefinitions);
     }
 
     /**
@@ -236,7 +221,7 @@ public class EditorRepository implements Repository
         debug("getTypeDefinition");
         checkUser(context, false);
 
-        return ((AdditionalTypemanager) typeManager).getTypeDefinition(context, typeId);
+        return typeManager.getTypeDefinition(context, typeId);
     }
 
     /**
@@ -1490,7 +1475,7 @@ public class EditorRepository implements Repository
         File file = getFile(objectId);
 
         // don't climb above the root folder
-        if (root.toFile().equals(file))
+        if (repositoryConfiguration.getRootPath().toFile().equals(file))
         {
             return Collections.emptyList();
         }
@@ -1538,12 +1523,12 @@ public class EditorRepository implements Repository
         File file = null;
         if (folderPath.length() == 1)
         {
-            file = root.toFile();
+            file = repositoryConfiguration.getRootPath().toFile();
         }
         else
         {
             String path = folderPath.replace('/', File.separatorChar).substring(1);
-            file = new File(root.toFile(), path);
+            file = new File(repositoryConfiguration.getRootPath().toFile(), path);
         }
 
         if (!file.exists())
@@ -1730,10 +1715,10 @@ public class EditorRepository implements Repository
                 addPropertyString(result, typeId, filter, PropertyIds.PATH, path);
 
                 // folder properties
-                if (!root.toFile().equals(file))
+                if (!repositoryConfiguration.getRootPath().toFile().equals(file))
                 {
                     addPropertyId(result, typeId, filter, PropertyIds.PARENT_ID,
-                            (root.toFile().equals(file.getParentFile()) ? ROOT_ID : fileToId(file.getParentFile())));
+                            (repositoryConfiguration.getRootPath().toFile().equals(file.getParentFile()) ? ROOT_ID : fileToId(file.getParentFile())));
                     objectInfo.setHasParent(true);
                 }
                 else
@@ -2215,7 +2200,7 @@ public class EditorRepository implements Repository
 
         boolean isReadOnly = !file.canWrite();
         boolean isFolder = file.isDirectory();
-        boolean isRoot = root.toFile().equals(file);
+        boolean isRoot = repositoryConfiguration.getRootPath().toFile().equals(file);
 
         Set<Action> aas = EnumSet.noneOf(Action.class);
 
@@ -2404,10 +2389,10 @@ public class EditorRepository implements Repository
 
         if (id.equals(ROOT_ID))
         {
-            return root.toFile();
+            return repositoryConfiguration.getRootPath().toFile();
         }
 
-        return new File(root.toFile(), (new String(org.apache.chemistry.opencmis.commons.impl.Base64.decode(id.getBytes("US-ASCII")), "UTF-8")).replace('/',
+        return new File(repositoryConfiguration.getRootPath().toFile(), (new String(org.apache.chemistry.opencmis.commons.impl.Base64.decode(id.getBytes("US-ASCII")), "UTF-8")).replace('/',
                 File.separatorChar));
     }
 
@@ -2437,7 +2422,7 @@ public class EditorRepository implements Repository
             throw new IllegalArgumentException("File is not valid!");
         }
 
-        if (root.toFile().equals(file))
+        if (repositoryConfiguration.getRootPath().toFile().equals(file))
         {
             return ROOT_ID;
         }
@@ -2449,7 +2434,7 @@ public class EditorRepository implements Repository
 
     private String getRepositoryPath(File file)
     {
-        String path = file.getAbsolutePath().substring(root.toFile().getAbsolutePath().length())
+        String path = file.getAbsolutePath().substring(repositoryConfiguration.getRootPath().toFile().getAbsolutePath().length())
                 .replace(File.separatorChar, '/');
         if (path.length() == 0)
         {

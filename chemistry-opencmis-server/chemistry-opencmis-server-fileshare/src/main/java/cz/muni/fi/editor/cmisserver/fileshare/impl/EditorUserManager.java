@@ -3,6 +3,9 @@ package cz.muni.fi.editor.cmisserver.fileshare.impl;
 import cz.muni.fi.editor.cmisserver.fileshare.UserManager;
 import org.apache.chemistry.opencmis.commons.exceptions.CmisPermissionDeniedException;
 import org.apache.chemistry.opencmis.commons.server.CallContext;
+import org.springframework.beans.factory.config.ConfigurableBeanFactory;
+import org.springframework.context.annotation.Scope;
+import org.springframework.stereotype.Component;
 
 import java.util.Collection;
 import java.util.HashMap;
@@ -12,6 +15,7 @@ import java.util.Map;
  * Code is taken from default apache fileshare implementation.
  * Created by emptak on 2/6/17.
  */
+@Component
 public class EditorUserManager implements UserManager
 {
     private final Map<String, String> logins = new HashMap<>();

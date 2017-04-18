@@ -19,7 +19,6 @@ import java.util.List;
  */
 public interface Repository
 {
-
     String getRepositoryId();
 
     File getRootDirectory();

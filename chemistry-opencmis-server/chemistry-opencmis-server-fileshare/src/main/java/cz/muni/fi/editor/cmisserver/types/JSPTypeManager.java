@@ -7,7 +7,7 @@ import java.util.Collection;
 /**
  * @author Dominik Szalai - emptulik at gmail.com on 12.07.2016.
  */
-public interface JSPTypeManager
+public interface JSPTypeManager extends EditorTypeManager
 {
     Collection<TypeDefinition> getInternalTypeDefinitions();
 }

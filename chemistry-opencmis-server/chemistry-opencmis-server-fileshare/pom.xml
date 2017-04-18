@@ -98,6 +98,11 @@
             <version>6.1.0</version>
         </dependency>
         <dependency>
+            <groupId>javax.inject</groupId>
+            <artifactId>javax.inject</artifactId>
+            <version>1</version>
+        </dependency>
+        <dependency>
             <groupId>org.apache.lucene</groupId>
             <artifactId>lucene-queryparser</artifactId>
             <version>6.1.0</version>
