@@ -47,10 +47,10 @@ public class EditorRepositoryFactory
             throw new IllegalArgumentException("Invalid repository id!");
         }
 
-        RepositoryConfigurationImpl configuration = repositoryConfigurationProvider.get();
-        configuration.setRepositoryPath(root);
+        RepositoryConfigurationImpl repositoryConfiguration = repositoryConfigurationProvider.get();
+        repositoryConfiguration.setRepositoryPath(root);
         try{
-            checkConfiguration(configuration);
+            checkConfiguration(repositoryConfiguration);
         }
         catch (IOException ex){
             throw new IllegalArgumentException(ex);
@@ -58,12 +58,13 @@ public class EditorRepositoryFactory
 
 
         EditorTypeManagerImpl editorTypeManager = editorTypeManagerProvider.get();
+        editorTypeManager.setRepositoryConfiguration(repositoryConfiguration);
         editorTypeManager.init();
 
         EditorRepository repository = repositoryProvider.get();
         repository.setRepositoryId(repositoryId);
         repository.setUserManager(userManager);
-        repository.setRepositoryConfiguration(configuration);
+        repository.setRepositoryConfiguration(repositoryConfiguration);
         repository.setTypeManager(editorTypeManager);
 
         repository.initializeRepository();

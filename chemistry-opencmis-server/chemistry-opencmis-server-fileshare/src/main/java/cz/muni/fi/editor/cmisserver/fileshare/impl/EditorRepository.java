@@ -74,15 +74,6 @@ public class EditorRepository implements Repository
 
     private QueryParserFactory qps = new QueryParserFactory();
 
-    private DirectoryStream.Filter<Path> filter = new DirectoryStream.Filter<Path>()
-    {
-        @Override
-        public boolean accept(Path entry) throws IOException
-        {
-            return entry.getFileName().toString().endsWith(".xml");
-        }
-    };
-
     public EditorRepository(){
 
     }
@@ -1567,7 +1558,7 @@ public class EditorRepository implements Repository
     @Override
     public TypeDefinition createType(String repositoryId, TypeDefinition type)
     {
-        return null;
+        return typeManager.createType(repositoryId,type);
     }
 
     // --- helpers ---

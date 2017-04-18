@@ -5,20 +5,25 @@ import org.apache.chemistry.opencmis.commons.PropertyIds;
 import org.apache.chemistry.opencmis.commons.definitions.*;
 import org.apache.chemistry.opencmis.commons.enums.CmisVersion;
 import org.apache.chemistry.opencmis.commons.exceptions.CmisObjectNotFoundException;
+import org.apache.chemistry.opencmis.commons.exceptions.CmisRuntimeException;
 import org.apache.chemistry.opencmis.commons.impl.IOUtils;
 import org.apache.chemistry.opencmis.commons.impl.XMLConverter;
 import org.apache.chemistry.opencmis.commons.impl.XMLUtils;
 import org.apache.chemistry.opencmis.commons.impl.dataobjects.TypeDefinitionContainerImpl;
 import org.apache.chemistry.opencmis.commons.server.CallContext;
 import org.apache.chemistry.opencmis.server.support.TypeDefinitionFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.config.ConfigurableBeanFactory;
 import org.springframework.context.annotation.Scope;
 import org.springframework.stereotype.Component;
 
 import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
+import javax.xml.stream.XMLStreamWriter;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.math.BigInteger;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
@@ -32,13 +37,24 @@ import java.util.*;
 @Scope(ConfigurableBeanFactory.SCOPE_PROTOTYPE)
 public class EditorTypeManagerImpl implements JSPTypeManager
 {
+    private static final Logger LOG = LoggerFactory.getLogger(EditorTypeManagerImpl.class);
     private static final String NAMESPACE = "http://chemistry.apache.org/opencmis/fileshare";
+
+    private final Object LOCK = new Object();
 
     private final Map<String, TypeDefinitionContainer> tdcMap = new HashMap<>();
     private final Map<String, TypeDefinition> tdMap = new HashMap<>();
 
     private TypeDefinitionFactory typeDefinitionFactory;
     private RepositoryConfiguration repositoryConfiguration;
+    private DirectoryStream.Filter<Path> filter = new DirectoryStream.Filter<Path>()
+    {
+        @Override
+        public boolean accept(Path entry) throws IOException
+        {
+            return entry.getFileName().toString().endsWith(".xml");
+        }
+    };
 
     public EditorTypeManagerImpl()
     {
@@ -64,19 +80,20 @@ public class EditorTypeManagerImpl implements JSPTypeManager
         this.repositoryConfiguration = repositoryConfiguration;
     }
 
-    public void init(){
-      /*  try (DirectoryStream<Path> ds = Files.newDirectoryStream(configurationDirectory, filter))
+    public void init()
+    {
+        try (DirectoryStream<Path> ds = Files.newDirectoryStream(repositoryConfiguration.getConfigurationPath(), filter))
         {
             for (Path xmltype : ds)
             {
-                ((InitializingTypeManager) typeManager).loadFromPath(xmltype);
+                this.loadFromPath(xmltype);
                 LOG.info(String.format("XML type from path '%s' added.", xmltype));
             }
         }
         catch (IOException | XMLStreamException ex)
         {
             throw new CmisRuntimeException(ex.getMessage(), BigInteger.ZERO, ex);
-        }*/
+        }
     }
 
     @Override
@@ -108,20 +125,21 @@ public class EditorTypeManagerImpl implements JSPTypeManager
     @Override
     public TypeDefinition createType(String repositoryId, TypeDefinition type)
     {
-        return null;
-    }
+        synchronized (LOCK){
+            try
+            {
+                this.saveTypeDefintion(type);
+            }
+            catch (IOException e)
+            {
+                throw new CmisRuntimeException("error while creating td",e);
+            }
 
-//    @Override
-//    public void loadTypeDefinitionFromFile(String filename) throws IOException, XMLStreamException
-//    {
-//        loadTypeDefinitionFromStream(new BufferedInputStream(new FileInputStream(filename), 64 * 1024));
-//    }
-//
-//    @Override
-//    public void loadTypeDefinitionFromResource(String name) throws IOException, XMLStreamException
-//    {
-//        loadTypeDefinitionFromStream(this.getClass().getResourceAsStream(name));
-//    }
+            addTypeDefinition(type, true);
+
+            return type;
+        }
+    }
 
     @Override
     public Collection<TypeDefinition> getInternalTypeDefinitions()
@@ -270,6 +288,64 @@ public class EditorTypeManagerImpl implements JSPTypeManager
         }
 
         addTypeDefinition(type, true);
+    }
+
+    private void saveTypeDefintion(TypeDefinition typeDefinition) throws IOException
+    {
+        if (typeDefinition == null)
+        {
+            throw new IllegalArgumentException("null");
+        }
+
+        String fileName = typeDefinition.getId().replaceAll(":", "_") + ".xml";
+        Path newFile = repositoryConfiguration.getConfigurationPath().resolve(fileName);
+        if (Files.exists(newFile))
+        {
+            throw new IOException(String.format("Type with id '%s' converted to filename '%s' at path '%s' already exists.",
+                    typeDefinition.getId(), fileName, repositoryConfiguration.getConfigurationPath()));
+        }
+        else
+        {
+            Files.createFile(newFile);
+        }
+
+
+
+        XMLStreamWriter writer = null;
+        OutputStream fos = null;
+        try
+        {
+            fos = Files.newOutputStream(newFile);
+            writer = XMLUtils.createWriter(fos);
+            writer.setPrefix("cmisra","http://docs.oasis-open.org/ns/cmis/restatom/200908");
+            writer.setPrefix("cmis","http://docs.oasis-open.org/ns/cmis/core/200908");
+            writer.setPrefix("xsi","http://www.w3.org/2001/XMLSchema-instance");
+            writer.setPrefix("type","cmis:cmisTypeDocumentDefinitionType");
+            writer.setDefaultNamespace("http://docs.oasis-open.org/ns/cmis/core/200908");
+
+            XMLConverter.writeTypeDefinition(writer, CmisVersion.CMIS_1_1, "http://docs.oasis-open.org/ns/cmis/core/200908", typeDefinition);
+        }
+        catch (XMLStreamException ex)
+        {
+            LOG.error(ex.getMessage());
+            Files.delete(newFile);
+            throw new IOException(ex);
+        }
+        finally
+        {
+            if (writer != null)
+            {
+                try
+                {
+                    writer.close();
+                }
+                catch (XMLStreamException e)
+                {
+                    throw new IOException(e);
+                }
+            }
+        }
+
     }
 
     private TypeDefinitionContainer createFolderType(CmisVersion cmisVersion)

@@ -99,6 +99,12 @@ public class EditorCmisService extends AbstractCmisService implements CallContex
     }
 
     @Override
+    public TypeDefinition createType(String repositoryId, TypeDefinition type, ExtensionsData extension)
+    {
+        return getRepository().createType(repositoryId,type);
+    }
+
+    @Override
     public ObjectInFolderList getChildren(String repositoryId, String folderId, String filter, String orderBy, Boolean includeAllowableActions, IncludeRelationships includeRelationships, String renditionFilter, Boolean includePathSegment, BigInteger maxItems, BigInteger skipCount, ExtensionsData extension)
     {
         return getRepository().getChildren(getCallContext(), folderId, filter, orderBy, includeAllowableActions,

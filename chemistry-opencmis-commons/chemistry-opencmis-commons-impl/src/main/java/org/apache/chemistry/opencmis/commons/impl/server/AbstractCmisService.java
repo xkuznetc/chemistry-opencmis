@@ -217,7 +217,7 @@ public abstract class AbstractCmisService implements CmisService, ObjectInfoHand
     @Override
     public abstract TypeDefinition getTypeDefinition(String repositoryId, String typeId, ExtensionsData extension);
 
-    /**
+   /* *//**
      * {@inheritDoc}
      * 
      * <p>
@@ -227,11 +227,11 @@ public abstract class AbstractCmisService implements CmisService, ObjectInfoHand
      * <li>Implementation is optional.</li>
      * <li>Introduced in CMIS 1.1</li>
      * </ul>
-     */
+     *//*
     @Override
     public TypeDefinition createType(String repositoryId, TypeDefinition type, ExtensionsData extension) {
         throw new CmisNotSupportedException("Not supported!");
-    }
+    }*/
 
     /**
      * {@inheritDoc}
