@@ -191,6 +191,11 @@ public class CmisServiceWrapperManagerTest {
         }
 
         @Override
+        public TypeDefinition createType(String repositoryId, TypeDefinition type, ExtensionsData extension) {
+            return null;
+        }
+
+        @Override
         public ObjectInFolderList getChildren(String repositoryId, String folderId, String filter, String orderBy,
                 Boolean includeAllowableActions, IncludeRelationships includeRelationships, String renditionFilter,
                 Boolean includePathSegment, BigInteger maxItems, BigInteger skipCount, ExtensionsData extension) {

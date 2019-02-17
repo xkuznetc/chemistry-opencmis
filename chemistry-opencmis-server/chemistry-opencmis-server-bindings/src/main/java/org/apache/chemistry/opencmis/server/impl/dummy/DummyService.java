@@ -111,4 +111,9 @@ public class DummyService extends AbstractCmisService {
             ExtensionsData extension) {
         throw new CmisNotSupportedException();
     }
+
+    @Override
+    public TypeDefinition createType(String repositoryId, TypeDefinition type, ExtensionsData extension) {
+        return null;
+    }
 }
