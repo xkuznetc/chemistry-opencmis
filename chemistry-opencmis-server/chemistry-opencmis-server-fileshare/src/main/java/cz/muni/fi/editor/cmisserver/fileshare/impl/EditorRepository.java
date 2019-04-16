@@ -573,7 +573,11 @@ public class EditorRepository implements Repository
         document.add(new StringField("cmis:path", getRepositoryPath(newFolder), Field.Store.YES));
         document.add(new TextField("cmis:name", name, Field.Store.YES));
 
-        luceneService.add(document);
+        if (luceneService != null) {
+            luceneService.add(document);
+        } else {
+            LOG.warn("Lucene service isn't initialized yet. Please check the configuration of server and/or ");
+        }
         return folderID;
     }
 
@@ -1537,6 +1541,15 @@ public class EditorRepository implements Repository
     public ObjectList query(String repositoryId, String statement, Boolean searchAllVersions, Boolean includeAllowableActions, IncludeRelationships includeRelationships, String renditionFilter, BigInteger maxItems, BigInteger skipCount, ExtensionsData extension)
     {
         QueryParser qp = qps.getQueryParser();
+
+      if(luceneService == null) {
+        LOG.warn("Lucene cluster isn't configured, will return empty result set");
+        ObjectListImpl oli = new ObjectListImpl();
+        oli.setObjects(new ArrayList<ObjectData>());
+        oli.setHasMoreItems(false);
+        oli.setNumItems(BigInteger.ZERO);
+        return oli;
+      }
 
         try
         {
